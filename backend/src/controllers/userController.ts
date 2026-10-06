@@ -1,0 +1,52 @@
+/**
+ * User/Profile Controller
+ * Handles profile read and update with MongoDB Atlas persistence
+ */
+import { Response } from 'express';
+import { findUserById, updateUserProfile } from '../models/User.ts';
+import { AuthenticatedRequest } from '../middleware/authMiddleware.ts';
+
+export async function getProfile(req: AuthenticatedRequest, res: Response) {
+  try {
+    if (!req.user?.id) {
+      return res.status(401).json({ success: false, message: 'Authentication required.' });
+    }
+
+    const user = await findUserById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User profile not found.' });
+    }
+
+    return res.json({
+      success: true,
+      profile: user.profile,
+      email: user.email,
+      id: user.id
+    });
+  } catch (err: any) {
+    console.error('getProfile error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error.' });
+  }
+}
+
+export async function updateProfile(req: AuthenticatedRequest, res: Response) {
+  try {
+    if (!req.user?.id) {
+      return res.status(401).json({ success: false, message: 'Authentication required.' });
+    }
+
+    const updatedProfile = await updateUserProfile(req.user.id, req.body);
+    if (!updatedProfile) {
+      return res.status(404).json({ success: false, message: 'User not found to update.' });
+    }
+
+    return res.json({
+      success: true,
+      message: 'Profile updated successfully!',
+      profile: updatedProfile
+    });
+  } catch (err: any) {
+    console.error('updateProfile error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error.' });
+  }
+}

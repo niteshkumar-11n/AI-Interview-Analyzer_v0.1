@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  # Piston Code Execution Engine
+  piston:
+    image: ghcr.io/engineer-man/piston
+    container_name: piston-engine
+    ports:
+      - "2000:2000"
+    volumes:
+      - ./piston/packages:/piston/packages
+    restart: unless-stopped
+    environment:
+      - PISTON_RUN_TIMEOUT=10000
+      - PISTON_COMPILE_TIMEOUT=10000

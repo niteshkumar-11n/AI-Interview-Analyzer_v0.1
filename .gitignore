@@ -1,0 +1,15 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env
+.env.local
+!.env.example
+frontend/node_modules/
+backend/node_modules/
+backend/uploads/resumes/*
+backend/uploads/audio/*
+!backend/uploads/resumes/.gitkeep
+!backend/uploads/audio/.gitkeep

@@ -1,0 +1,21 @@
+/* Responsive Breakpoint Utilities */
+
+/* Sidebar Responsive Layout */
+@media (min-width: 992px) {
+  .sidebar-offset-container {
+    padding-left: 240px !important;
+  }
+}
+
+/* Mobile adjustments */
+@media (max-width: 768px) {
+  .content-wrap {
+    padding: 0.5rem;
+  }
+}
+
+@media (max-width: 576px) {
+  .card {
+    border-radius: 8px;
+  }
+}

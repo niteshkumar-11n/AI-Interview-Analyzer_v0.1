@@ -1,0 +1,80 @@
+@import "tailwindcss";
+
+:root {
+  --sn-primary: #1d4ed8;
+  --sn-primary-hover: #1e40af;
+  --sn-surface: #ffffff;
+  --sn-bg: #f8fafc;
+  --sn-border: #e2e8f0;
+}
+
+body {
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  background-color: #f8fafc;
+  color: #1e293b;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Card and component polish for Bootstrap */
+.card {
+  border-color: #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s ease-in-out;
+}
+
+.card:hover {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -2px rgba(0, 0, 0, 0.07);
+}
+
+.card-header {
+  background-color: transparent;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.badge {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.form-control:focus, .form-select:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 0.2rem rgba(59, 130, 246, 0.15);
+}
+
+.btn-primary {
+  background-color: #2563eb;
+  border-color: #2563eb;
+}
+
+.btn-primary:hover {
+  background-color: #1d4ed8;
+  border-color: #1d4ed8;
+}
+
+.progress {
+  border-radius: 9999px;
+  background-color: #e2e8f0;
+}
+
+.progress-bar {
+  border-radius: 9999px;
+}
+
+/* Sidebar Responsive Layout */
+@media (min-width: 992px) {
+  .sidebar-offset-container {
+    padding-left: 240px !important;
+  }
+}
+
+/* Gauge Rotation for 12 o'clock start */
+.rotate-neg-90 {
+  transform: rotate(-90deg);
+  transform-origin: center;
+}
+
+.shadow-xs {
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.04);
+}
+
