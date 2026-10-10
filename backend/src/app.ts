@@ -11,6 +11,10 @@ import dashboardRoutes from './routes/dashboardRoutes.ts';
 import { errorMiddleware } from './middleware/errorMiddleware.ts';
 import jobRoutes from './routes/jobRoutes.ts';
 import codingRoutes from './routes/codingRoutes.ts';
+import githubRoutes from './routes/githubRoutes.ts';
+import interviewRoutes from './routes/interviewRoutes.ts';
+import paymentRoutes from './routes/paymentRoutes.ts';
+import resumeRoutes from './routes/resumeRoutes.ts';
 
 export async function createApp() {
   const app = express();
@@ -20,7 +24,7 @@ export async function createApp() {
     const origin = req.headers.origin || '*';
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, x-github-session');
     res.setHeader('Access-Control-Allow-Credentials', 'true');
 
     if (req.method === 'OPTIONS') {
@@ -48,7 +52,7 @@ export async function createApp() {
 
     res.json({
       status: 'ok',
-      service: 'SkillNexus AI Server',
+      service: 'CareerCraft AI Server',
       database: dbStatus,
       databaseReadyState: mongoose.connection.readyState,
       timestamp: new Date().toISOString()
@@ -61,6 +65,10 @@ export async function createApp() {
   app.use('/api/dashboard', dashboardRoutes);
   app.use('/api/job', jobRoutes);
   app.use('/api/coding', codingRoutes);
+  app.use('/api/github', githubRoutes);
+  app.use('/api/interview', interviewRoutes);
+  app.use('/api/payment', paymentRoutes);
+  app.use('/api/resume', resumeRoutes);
 
   // In production, serve the built frontend assets
   if (process.env.NODE_ENV === 'production') {

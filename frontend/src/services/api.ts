@@ -1,4 +1,15 @@
-import { User, UserProfile, DashboardData, InterviewScore } from '../types.ts';
+import {
+  User,
+  UserProfile,
+  DashboardData,
+  InterviewScore,
+  CreditPackage,
+  WalletInfo,
+  WalletTransaction,
+  InterviewSessionData,
+  TechnicalInterviewReport,
+  InterviewHistoryItem,
+} from '../types.ts';
 
 const TOKEN_KEY = 'skillnexus_auth_token';
 
@@ -8,15 +19,29 @@ export const authStorage = {
   removeToken: () => localStorage.removeItem(TOKEN_KEY),
 };
 
+const GITHUB_SESSION_KEY = 'skillnexus_github_session';
+
+export const githubAuthStorage = {
+  getSessionToken: () => localStorage.getItem(GITHUB_SESSION_KEY),
+  setSessionToken: (token: string) => localStorage.setItem(GITHUB_SESSION_KEY, token),
+  removeSessionToken: () => localStorage.removeItem(GITHUB_SESSION_KEY),
+};
+
 const RAW_BASE_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || '';
 const API_BASE_URL = typeof RAW_BASE_URL === 'string' ? RAW_BASE_URL.replace(/\/$/, '') : '';
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const token = authStorage.getToken();
+  const ghSession = githubAuthStorage.getSessionToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string>),
   };
+
+  if (ghSession) {
+    headers['x-github-session'] = ghSession;
+  }
+
 
   // Only attach Bearer token to authenticated endpoints (never to login or register)
   const isAuthPublicEndpoint =
@@ -303,4 +328,489 @@ export const api = {
         body: JSON.stringify(params),
       }),
   },
+
+  github: {
+    analyzeProfile: (username: string, forceRefresh = false) =>
+      request<{
+        success: boolean;
+        data: GitHubAnalysis;
+        cached: boolean;
+        message: string;
+      }>('/api/github/analyze', {
+        method: 'POST',
+        body: JSON.stringify({ username, forceRefresh }),
+      }),
+
+    getIssues: (params: {
+      skills?: any;
+      username?: string;
+      language?: string;
+      difficulty?: string;
+      labels?: string[];
+      page?: number;
+      perPage?: number;
+      sort?: string;
+    }) =>
+      request<{
+        success: boolean;
+        data: {
+          issues: GitHubIssueRecommendation[];
+          totalCount: number;
+        };
+        message: string;
+      }>('/api/github/issues', {
+        method: 'POST',
+        body: JSON.stringify(params),
+      }),
+
+    getCustomIssues: (params: {
+      languages: string[];
+      frameworks?: string[];
+      tools?: string[];
+      difficulty?: string;
+      page?: number;
+      perPage?: number;
+    }) =>
+      request<{
+        success: boolean;
+        data: {
+          issues: GitHubIssueRecommendation[];
+          totalCount: number;
+        };
+      }>('/api/github/issues/custom', {
+        method: 'POST',
+        body: JSON.stringify(params),
+      }),
+
+    validateUsername: (username: string) =>
+      request<{
+        success: boolean;
+        valid: boolean;
+        username?: string;
+        avatarUrl?: string;
+        name?: string;
+        message?: string;
+      }>('/api/github/validate-username', {
+        method: 'POST',
+        body: JSON.stringify({ username }),
+      }),
+
+    getRateLimit: () =>
+      request<{
+        success: boolean;
+        data: {
+          limit: number;
+          remaining: number;
+          reset: string;
+          used: number;
+        };
+      }>('/api/github/rate-limit'),
+
+    getOAuthStatus: () =>
+      request<{
+        success: boolean;
+        configured: boolean;
+        clientId: string | null;
+        callbackUrl: string;
+        mode: string;
+        message: string;
+      }>('/api/github/oauth/status'),
+
+    getOAuthAuthorizeUrl: () =>
+      request<{
+        success: boolean;
+        authUrl: string;
+        state: string;
+        configured?: boolean;
+        message?: string;
+      }>('/api/github/oauth/authorize-url'),
+
+    getConnectedOAuthUser: () =>
+      request<{
+        success: boolean;
+        connected: boolean;
+        user: {
+          username: string;
+          name?: string;
+          avatarUrl: string;
+          bio?: string;
+          publicRepos: number;
+          connectedAt: string;
+        } | null;
+      }>('/api/github/oauth/user'),
+
+    disconnectOAuthUser: () =>
+      request<{
+        success: boolean;
+        message: string;
+      }>('/api/github/oauth/disconnect', {
+        method: 'POST',
+      }),
+
+    startAssessment: (username?: string) =>
+      request<{
+        success: boolean;
+        data: {
+          assessmentId: string;
+          username: string;
+          totalQuestions: number;
+          questions: TechnicalAssessmentQuestion[];
+        };
+        message: string;
+      }>('/api/github/assessment/start', {
+        method: 'POST',
+        body: JSON.stringify({ username }),
+      }),
+
+    submitAssessment: (assessmentId: string, answers: { questionId: number; selectedOptionIndex: number }[]) =>
+      request<{
+        success: boolean;
+        data: TechnicalAssessmentResult;
+        message: string;
+      }>('/api/github/assessment/submit', {
+        method: 'POST',
+        body: JSON.stringify({ assessmentId, answers }),
+      }),
+
+    getAssessment: (assessmentId: string) =>
+      request<{
+        success: boolean;
+        data: TechnicalAssessmentResult;
+      }>(`/api/github/assessment/${assessmentId}`),
+
+    getWeaknessIssues: (params: {
+      assessmentId?: string;
+      weaknesses?: IdentifiedWeakness[];
+      username?: string;
+      language?: string;
+      difficulty?: string;
+      labels?: string[];
+      weaknessTopic?: string;
+      page?: number;
+      perPage?: number;
+      sort?: string;
+    }) =>
+      request<{
+        success: boolean;
+        data: {
+          issues: WeaknessIssueRecommendation[];
+          totalCount: number;
+        };
+        message: string;
+      }>('/api/github/issues/recommend-for-weaknesses', {
+        method: 'POST',
+        body: JSON.stringify(params),
+      }),
+  },
+
+  interview: {
+    generateQuestions: (params: {
+      role: string;
+      category?: string;
+      experience: string;
+      difficulty?: string;
+      mode?: 'Technical' | 'HR';
+      skills?: string[];
+      projects?: string[];
+    }) =>
+      request<{
+        success: boolean;
+        data: InterviewSessionData;
+        message?: string;
+      }>('/api/interview/generate-questions', {
+        method: 'POST',
+        body: JSON.stringify(params),
+      }),
+
+    submitAnswer: (params: {
+      interviewId: string;
+      questionIndex: number;
+      answer: string;
+      timeTaken: number;
+    }) =>
+      request<{
+        success: boolean;
+        data: {
+          feedback: string;
+          score: number;
+          confidence: number;
+          communication: number;
+          correctness: number;
+          strengths?: string[];
+          improvements?: string[];
+          missingConcepts?: string[];
+        };
+      }>('/api/interview/submit-answer', {
+        method: 'POST',
+        body: JSON.stringify(params),
+      }),
+
+    finish: (params: { interviewId: string }) =>
+      request<{
+        success: boolean;
+        data: TechnicalInterviewReport;
+      }>('/api/interview/finish', {
+        method: 'POST',
+        body: JSON.stringify(params),
+      }),
+
+    getHistory: () =>
+      request<{
+        success: boolean;
+        data: InterviewHistoryItem[];
+      }>('/api/interview/history'),
+
+    getReport: (id: string) =>
+      request<{
+        success: boolean;
+        data: TechnicalInterviewReport;
+      }>(`/api/interview/report/${id}`),
+  },
+
+  payment: {
+    getPackages: () =>
+      request<{
+        success: boolean;
+        data: {
+          packages: CreditPackage[];
+          featureCosts: Record<string, number>;
+          isGatewayConfigured: boolean;
+          razorpayKeyId: string;
+        };
+      }>('/api/payment/packages'),
+
+    getWallet: () =>
+      request<{
+        success: boolean;
+        data: WalletInfo;
+      }>('/api/payment/wallet'),
+
+    createOrder: (planId: string) =>
+      request<{
+        success: boolean;
+        data: {
+          orderId: string;
+          amount: number;
+          currency: string;
+          keyId: string;
+          plan: CreditPackage;
+        };
+        message?: string;
+      }>('/api/payment/order', {
+        method: 'POST',
+        body: JSON.stringify({ planId }),
+      }),
+
+    verifyPayment: (payload: {
+      razorpay_order_id: string;
+      razorpay_payment_id: string;
+      razorpay_signature: string;
+    }) =>
+      request<{
+        success: boolean;
+        message: string;
+        data: {
+          credits: number;
+          creditsAdded?: number;
+          paymentId?: string;
+          alreadyProcessed?: boolean;
+        };
+      }>('/api/payment/verify', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+
+    getTransactions: () =>
+      request<{
+        success: boolean;
+        data: WalletTransaction[];
+      }>('/api/payment/transactions'),
+  },
 };
+
+
+// ===== GitHub Types =====
+
+export interface GitHubAnalysis {
+  profile: {
+    login: string;
+    name: string | null;
+    avatar_url: string;
+    html_url: string;
+    bio: string | null;
+    location: string | null;
+    company: string | null;
+    blog: string | null;
+    twitter_username: string | null;
+    public_repos: number;
+    public_gists: number;
+    followers: number;
+    following: number;
+    created_at: string;
+    updated_at: string;
+  };
+  repos: {
+    id: number;
+    name: string;
+    full_name: string;
+    html_url: string;
+    description: string | null;
+    fork: boolean;
+    created_at: string;
+    updated_at: string;
+    pushed_at: string;
+    stargazers_count: number;
+    forks_count: number;
+    open_issues_count: number;
+    language: string | null;
+    topics: string[];
+    size: number;
+  }[];
+  languageStats: {
+    languages: {
+      name: string;
+      bytes: number;
+      percentage: number;
+      color: string;
+    }[];
+    totalBytes: number;
+    totalRepos: number;
+  };
+  skills: {
+    languages: string[];
+    frameworks: string[];
+    tools: string[];
+    databases: string[];
+    cloud: string[];
+    other: string[];
+    all: string[];
+  };
+  topRepos: {
+    id: number;
+    name: string;
+    full_name: string;
+    html_url: string;
+    description: string | null;
+    stargazers_count: number;
+    forks_count: number;
+    open_issues_count: number;
+    language: string | null;
+    topics: string[];
+    pushed_at: string;
+  }[];
+  recentRepos: {
+    id: number;
+    name: string;
+    full_name: string;
+    html_url: string;
+    description: string | null;
+    stargazers_count: number;
+    forks_count: number;
+    open_issues_count: number;
+    language: string | null;
+    topics: string[];
+    pushed_at: string;
+  }[];
+  stats: {
+    totalStars: number;
+    totalForks: number;
+    totalOpenIssues: number;
+    originalRepos: number;
+    forkedRepos: number;
+    averageRepoSize: number;
+    accountAgeYears: number;
+  };
+}
+
+export interface GitHubIssueRecommendation {
+  id: string;
+  repo: string;
+  repoUrl: string;
+  issueNumber: number;
+  title: string;
+  body: string;
+  labels: string[];
+  state: string;
+  comments: number;
+  created_at: string;
+  updated_at: string;
+  html_url: string;
+  language: string;
+  stars: number;
+  matchScore: number;
+  matchReasons: string[];
+  difficulty: string;
+}
+
+export interface WeaknessIssueRecommendation extends GitHubIssueRecommendation {
+  weaknessAddressed: string;
+  whyRecommended: string;
+  difficultyEstimate: 'Beginner Friendly' | 'Intermediate' | 'Advanced';
+}
+
+export interface TechnicalAssessmentQuestion {
+  id: number;
+  question: string;
+  codeSnippet?: string | null;
+  topic: string;
+  category: string;
+  options: string[];
+  relatedSkill: string;
+  difficulty: 'beginner' | 'intermediate' | 'advanced';
+}
+
+export interface QuestionEvaluationResult {
+  questionId: number;
+  question: string;
+  codeSnippet?: string | null;
+  topic: string;
+  category: string;
+  options: string[];
+  userAnswerIndex: number;
+  correctAnswerIndex: number;
+  isCorrect: boolean;
+  explanation: string;
+  relatedSkill: string;
+}
+
+export interface TopicPerformance {
+  topic: string;
+  category: string;
+  correct: number;
+  total: number;
+  percentage: number;
+}
+
+export interface IdentifiedWeakness {
+  id: string;
+  topic: string;
+  relatedSkill: string;
+  category: string;
+  evidence: string;
+  whyItMatters: string;
+  learningPriority: 'High' | 'Medium';
+  practicalTasks: string[];
+  searchQueries: string[];
+}
+
+export interface IdentifiedStrength {
+  topic: string;
+  relatedSkill: string;
+  category: string;
+  evidence: string;
+}
+
+export interface TechnicalAssessmentResult {
+  assessmentId: string;
+  username: string;
+  score: number;
+  totalQuestions: number;
+  percentage: number;
+  performanceRating: 'Mastery' | 'Proficient' | 'Developing' | 'Needs Improvement';
+  evaluationSummary: string;
+  questionResults: QuestionEvaluationResult[];
+  topicBreakdown: TopicPerformance[];
+  strengths: IdentifiedStrength[];
+  weaknesses: IdentifiedWeakness[];
+  completedAt: string;
+}

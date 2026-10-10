@@ -1,11 +1,9 @@
 import React from 'react';
 import { 
   LayoutDashboard, 
-  FileText, 
   Briefcase, 
   Code2, 
   Sparkles, 
-
   GitPullRequest, 
   BarChart3, 
   User, 
@@ -20,17 +18,14 @@ import {
   Flame,
   Gauge,
   BarChart2,
-  MessageSquare
 } from 'lucide-react';
 
 export type NavItemKey = 
   | 'dashboard' 
-  | 'resume-analyzer' 
   | 'job-match' 
   | 'job-recommendations'
   | 'ai-interview'
   | 'coding-interview' 
-  | 'communication' 
   | 'interview-readiness'
   | 'github' 
   | 'interview-history' 
@@ -40,12 +35,10 @@ export type NavItemKey =
 export type ViewType = 
   | 'dashboard' 
   | 'profile' 
-  | 'resume-analyzer' 
   | 'job-matching' 
   | 'job-recommendations' 
   | 'ai-interview' 
   | 'coding-interview' 
-  | 'communication'
   | 'interview-readiness'
   | 'github'
   | 'analytics';
@@ -54,7 +47,7 @@ interface SidebarProps {
   currentView: ViewType;
   activeNav: NavItemKey;
   onNavigate: (view: ViewType, navKey?: NavItemKey) => void;
-  onOpenModal: (modal: 'resume' | 'coding' | 'jobs' | 'github' | 'history' | 'communication' | 'settings' | 'support' | 'mock') => void;
+  onOpenModal: (modal: 'coding' | 'jobs' | 'github' | 'history' | 'settings' | 'support' | 'mock') => void;
   isMobileOpen: boolean;
   onCloseMobile: () => void;
 }
@@ -74,8 +67,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       onNavigate('dashboard', 'dashboard');
     } else if (key === 'profile') {
       onNavigate('profile', 'profile');
-    } else if (key === 'resume-analyzer') {
-      onNavigate('resume-analyzer', 'resume-analyzer');
     } else if (key === 'job-match') {
       onNavigate('job-matching', 'job-match');
     } else if (key === 'job-recommendations') {
@@ -84,8 +75,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       onNavigate('ai-interview', 'ai-interview');
     } else if (key === 'coding-interview') {
       onNavigate('coding-interview', 'coding-interview');
-    } else if (key === 'communication') {
-      onNavigate('communication', 'communication');
     } else if (key === 'github') {
       onNavigate('github', 'github');
     } else if (key === 'interview-readiness') {
@@ -99,12 +88,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const navItems: { key: NavItemKey; label: string; icon: React.ReactNode }[] = [
     { key: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={18} /> },
-    { key: 'resume-analyzer', label: 'Resume', icon: <FileText size={18} /> },
     { key: 'job-match', label: 'Job Matching', icon: <Link2 size={18} /> },
     { key: 'job-recommendations', label: 'Job Recommendations', icon: <Briefcase size={18} /> },
     { key: 'ai-interview', label: 'AI Interview', icon: <Headphones size={18} /> },
     { key: 'coding-interview', label: 'Coding Practice', icon: <Code2 size={18} /> },
-    { key: 'communication', label: 'Communication Analysis', icon: <MessageSquare size={18} /> },
     { key: 'github', label: 'GitHub & Open Source', icon: <GitPullRequest size={18} /> },
     { key: 'interview-readiness', label: 'Interview Readiness', icon: <BarChart2 size={18} /> },
     { key: 'interview-history', label: 'Analytics', icon: <BarChart3 size={18} /> },
@@ -180,12 +167,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 const isActive = 
                   (item.key === 'dashboard' && currentView === 'dashboard') ||
                   (item.key === 'profile' && currentView === 'profile') ||
-                  (item.key === 'resume-analyzer' && currentView === 'resume-analyzer') ||
                   (item.key === 'job-match' && currentView === 'job-matching') ||
                   (item.key === 'job-recommendations' && currentView === 'job-recommendations') ||
                   (item.key === 'ai-interview' && currentView === 'ai-interview') ||
                   (item.key === 'coding-interview' && currentView === 'coding-interview') ||
-                  (item.key === 'communication' && currentView === 'communication') ||
 
                   (item.key === 'interview-readiness' && currentView === 'interview-readiness') ||
                   (item.key === 'github' && currentView === 'github') ||

@@ -7,18 +7,52 @@ import crypto from 'node:crypto';
 import { hashPassword } from '../utils/password.ts';
 
 // --- Type Definitions ---
+export type CareerStatus = 'student' | 'fresher' | 'working' | 'career_switcher';
+
+export interface OnboardingStatus {
+  isCompleted: boolean;
+  step: number; // 1: career-status, 2: conditional-details, 3: optional-resume
+  careerStatus?: CareerStatus;
+}
+
 export interface UserProfile {
   name: string;
   targetRole: string;
-  experience: string;
+  careerStatus?: CareerStatus;
+  onboardingStatus?: OnboardingStatus;
+  experience?: string;
+
+  // Student & Fresher specific
+  degree?: string;
+  specialization?: string;
   college: string;
+  academicYear?: string;
   graduationYear: number;
   education: string;
+
+  // Working professional specific
+  currentJobTitle?: string;
+  yearsOfExperience?: string;
+  currentCompany?: string;
+  workHistory?: { company: string; role: string; period: string; description: string }[];
+  preferredLocation?: string;
+  workMode?: 'Remote' | 'Hybrid' | 'On-site';
+
+  // Career switcher specific
+  previousBackground?: string;
+  relevantExperience?: string;
+  desiredCareerPath?: string;
+  learningGoals?: string;
+
+  // Universal profile fields
   bio: string;
   location: string;
   github: string;
   linkedin: string;
   portfolio: string;
+  githubUrl?: string;
+  linkedinUrl?: string;
+  portfolioUrl?: string;
   phone?: string;
   skills: { name: string; percentage: number; level: 'Beginner' | 'Intermediate' | 'Advanced' | 'Expert' }[];
   workExperience: { company: string; role: string; period: string; description: string }[];
@@ -32,6 +66,7 @@ export interface User {
   createdAt: string;
   resetToken?: string;
   resetTokenExpiry?: number;
+  credits: number;
   profile: UserProfile;
 }
 
@@ -43,6 +78,7 @@ export interface IUserDocument extends Document {
   createdAt: Date;
   resetToken?: string;
   resetTokenExpiry?: number;
+  credits: number;
   profile: UserProfile;
 }
 
@@ -53,18 +89,40 @@ const UserSchema = new Schema<IUserDocument>({
   createdAt: { type: Date, default: Date.now },
   resetToken: { type: String },
   resetTokenExpiry: { type: Number },
+  credits: { type: Number, default: 100, min: 0 },
   profile: {
     name: { type: String, required: true },
     targetRole: { type: String, default: 'Full Stack Engineer' },
+    careerStatus: { type: String, enum: ['student', 'fresher', 'working', 'career_switcher'], default: 'student' },
+    onboardingStatus: {
+      isCompleted: { type: Boolean, default: false },
+      step: { type: Number, default: 1 },
+      careerStatus: { type: String, default: 'student' }
+    },
     experience: { type: String, default: 'Fresher' },
+    degree: { type: String, default: 'B.Tech' },
+    specialization: { type: String, default: 'Computer Science' },
+    academicYear: { type: String, default: '4th Year' },
     college: { type: String, default: '' },
     graduationYear: { type: Number, default: 2025 },
     education: { type: String, default: 'Bachelor of Technology' },
+    currentJobTitle: { type: String, default: '' },
+    yearsOfExperience: { type: String, default: '' },
+    currentCompany: { type: String, default: '' },
+    preferredLocation: { type: String, default: 'Remote' },
+    workMode: { type: String, default: 'Hybrid' },
+    previousBackground: { type: String, default: '' },
+    relevantExperience: { type: String, default: '' },
+    desiredCareerPath: { type: String, default: '' },
+    learningGoals: { type: String, default: '' },
     bio: { type: String, default: 'Aspiring software engineer eager to build modern web solutions.' },
     location: { type: String, default: 'India' },
     github: { type: String, default: '' },
     linkedin: { type: String, default: '' },
     portfolio: { type: String, default: '' },
+    githubUrl: { type: String, default: '' },
+    linkedinUrl: { type: String, default: '' },
+    portfolioUrl: { type: String, default: '' },
     phone: { type: String, default: '' },
     skills: [
       {
@@ -105,6 +163,7 @@ function docToUser(doc: any): User {
     createdAt: doc.createdAt ? new Date(doc.createdAt).toISOString() : new Date().toISOString(),
     resetToken: doc.resetToken,
     resetTokenExpiry: doc.resetTokenExpiry,
+    credits: typeof doc.credits === 'number' ? doc.credits : 100,
     profile: {
       name: doc.profile?.name || '',
       targetRole: doc.profile?.targetRole || 'Full Stack Engineer',
@@ -207,15 +266,36 @@ export async function createUser(userData: {
   const defaultProfile: UserProfile = {
     name: userData.name.trim(),
     targetRole: userData.targetRole || 'Full Stack Engineer',
+    careerStatus: 'student',
+    onboardingStatus: {
+      isCompleted: false,
+      step: 1,
+      careerStatus: 'student'
+    },
     experience: 'Fresher developer',
+    degree: 'B.Tech',
+    specialization: 'Computer Science',
+    academicYear: '4th Year',
     college: '',
     graduationYear: 2025,
     education: 'Bachelor of Technology',
+    currentJobTitle: '',
+    yearsOfExperience: '',
+    currentCompany: '',
+    preferredLocation: 'Remote',
+    workMode: 'Hybrid',
+    previousBackground: '',
+    relevantExperience: '',
+    desiredCareerPath: '',
+    learningGoals: '',
     bio: `Passionate ${userData.targetRole || 'developer'} eager to build innovative software solutions.`,
     location: 'India',
     github: '',
     linkedin: '',
     portfolio: '',
+    githubUrl: '',
+    linkedinUrl: '',
+    portfolioUrl: '',
     skills: [
       { name: 'JavaScript', percentage: 75, level: 'Intermediate' },
       { name: 'React', percentage: 70, level: 'Intermediate' },
@@ -251,6 +331,7 @@ export async function createUser(userData: {
     passwordHash: userData.passwordHash,
     passwordSalt: userData.passwordSalt,
     createdAt: new Date().toISOString(),
+    credits: 100,
     profile: defaultProfile
   };
   users.set(newUser.id, newUser);
@@ -334,4 +415,95 @@ export async function setPasswordResetToken(email: string, token: string, expiry
     return true;
   }
   return false;
+}
+
+export async function getUserCredits(id: string): Promise<number> {
+  const user = await findUserById(id);
+  return user?.credits ?? 100;
+}
+
+export async function deductUserCredits(
+  id: string,
+  amount: number
+): Promise<{ success: boolean; remainingCredits: number; message?: string }> {
+  if (amount <= 0) return { success: true, remainingCredits: await getUserCredits(id) };
+
+  if (isMongoConnected() && mongoose.isValidObjectId(id)) {
+    try {
+      const updated = await UserModel.findOneAndUpdate(
+        { _id: id, credits: { $gte: amount } },
+        { $inc: { credits: -amount } },
+        { new: true }
+      ).lean();
+
+      if (updated) {
+        const u = docToUser(updated);
+        users.set(u.id, u);
+        return { success: true, remainingCredits: u.credits };
+      }
+
+      // Check current credits to provide informative message
+      const current = await UserModel.findById(id).lean();
+      const currentCredits = current?.credits ?? 0;
+      return {
+        success: false,
+        remainingCredits: currentCredits,
+        message: `Insufficient credits. Required: ${amount}, Available: ${currentCredits}`
+      };
+    } catch (err: any) {
+      console.error('[DB] deductUserCredits error:', err);
+      return { success: false, remainingCredits: 0, message: 'Database error while deducting credits.' };
+    }
+  }
+
+  // Fallback in-memory
+  const memUser = users.get(id);
+  if (!memUser) {
+    return { success: false, remainingCredits: 0, message: 'User not found.' };
+  }
+  const available = memUser.credits ?? 100;
+  if (available < amount) {
+    return {
+      success: false,
+      remainingCredits: available,
+      message: `Insufficient credits. Required: ${amount}, Available: ${available}`
+    };
+  }
+  memUser.credits = available - amount;
+  users.set(id, memUser);
+  return { success: true, remainingCredits: memUser.credits };
+}
+
+export async function addUserCredits(
+  id: string,
+  amount: number
+): Promise<{ success: boolean; newCredits: number }> {
+  if (amount <= 0) return { success: true, newCredits: await getUserCredits(id) };
+
+  if (isMongoConnected() && mongoose.isValidObjectId(id)) {
+    try {
+      const updated = await UserModel.findByIdAndUpdate(
+        id,
+        { $inc: { credits: amount } },
+        { new: true }
+      ).lean();
+
+      if (updated) {
+        const u = docToUser(updated);
+        users.set(u.id, u);
+        return { success: true, newCredits: u.credits };
+      }
+    } catch (err: any) {
+      console.error('[DB] addUserCredits error:', err);
+    }
+  }
+
+  // Fallback in-memory
+  const memUser = users.get(id);
+  if (memUser) {
+    memUser.credits = (memUser.credits ?? 100) + amount;
+    users.set(id, memUser);
+    return { success: true, newCredits: memUser.credits };
+  }
+  return { success: false, newCredits: 0 };
 }

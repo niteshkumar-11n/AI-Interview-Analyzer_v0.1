@@ -12,6 +12,7 @@ import {
   updateUserPassword,
   setPasswordResetToken 
 } from '../models/User.ts';
+import { recordTransaction } from '../models/Transaction.ts';
 import { hashPassword, verifyPassword } from '../utils/password.ts';
 import { signToken } from '../utils/jwt.ts';
 import { AuthenticatedRequest, setAuthCookie, clearAuthCookie } from '../middleware/authMiddleware.ts';
@@ -41,6 +42,20 @@ export async function register(req: Request, res: Response) {
       targetRole: targetRole || 'Full Stack Engineer',
     });
 
+    // Authoritative starter-credit grant recorded in Transaction ledger
+    try {
+      await recordTransaction({
+        userId: newUser.id,
+        type: 'SIGNUP_BONUS',
+        amountInr: 0,
+        credits: 100,
+        balanceAfter: 100,
+        description: 'Welcome bonus: 100 complimentary interview credits'
+      });
+    } catch (txErr: any) {
+      console.warn('[Ledger] Failed to record signup bonus transaction:', txErr.message);
+    }
+
     // Generate HMAC Token & Set HttpOnly Cookie
     const token = signToken({ id: newUser.id, email: newUser.email });
     setAuthCookie(res, token);
@@ -48,10 +63,11 @@ export async function register(req: Request, res: Response) {
     return res.status(201).json({
       success: true,
       token,
-      message: 'Account created successfully! Welcome to SkillNexus AI.',
+      message: 'Account created successfully! Welcome to CareerCraft AI.',
       user: {
         id: newUser.id,
         email: newUser.email,
+        credits: newUser.credits ?? 100,
         profile: newUser.profile
       }
     });
@@ -97,6 +113,7 @@ export async function login(req: Request, res: Response) {
       user: {
         id: user.id,
         email: user.email,
+        credits: user.credits ?? 100,
         profile: user.profile
       }
     });
@@ -129,6 +146,7 @@ export async function getMe(req: AuthenticatedRequest, res: Response) {
       user: {
         id: user.id,
         email: user.email,
+        credits: user.credits ?? 100,
         createdAt: user.createdAt,
         profile: user.profile
       }

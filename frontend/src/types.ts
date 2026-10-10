@@ -38,6 +38,7 @@ export interface UserProfile {
 export interface User {
   id: string;
   email: string;
+  credits?: number;
   profile: UserProfile;
 }
 
@@ -133,4 +134,111 @@ export interface DashboardData {
   recommendedJobs: RecommendedJob[];
   recommendedIssues: OpenSourceIssue[];
   recentActivities: UserActivity[];
+  credits?: number;
+  recentInterviewHistory?: any[];
+  recentTransactions?: any[];
+}
+
+export interface CreditPackage {
+  id: string;
+  name: string;
+  priceInr: number;
+  credits: number;
+  description: string;
+  features: string[];
+  badge?: string;
+  popular?: boolean;
+}
+
+export interface WalletTransaction {
+  id: string;
+  userId: string;
+  type: 'PURCHASE' | 'DEDUCTION' | 'REFUND' | 'SIGNUP_BONUS';
+  amountInr: number;
+  credits: number;
+  balanceAfter: number;
+  description: string;
+  referenceId?: string;
+  status: 'SUCCESS' | 'PENDING' | 'FAILED';
+  createdAt: string;
+}
+
+export interface WalletInfo {
+  credits: number;
+  userId: string;
+  email: string;
+  recentTransactions: WalletTransaction[];
+  canStartInterview: boolean;
+  interviewCost: number;
+}
+
+export interface QuestionWiseScore {
+  questionNumber: number;
+  question: string;
+  difficulty: 'easy' | 'medium' | 'hard';
+  timeLimit?: number;
+  timeTaken?: number;
+  answer?: string;
+  score: number;
+  confidence: number;
+  communication: number;
+  correctness: number;
+  feedback: string;
+  strengths?: string[];
+  improvements?: string[];
+  missingConcepts?: string[];
+}
+
+export interface InterviewSessionData {
+  interviewId: string;
+  creditsLeft?: number;
+  userName?: string;
+  role: string;
+  category: string;
+  experience: string;
+  difficulty: string;
+  mode: 'Technical' | 'HR';
+  questions: {
+    question: string;
+    difficulty: 'easy' | 'medium' | 'hard';
+    timeLimit: number;
+    score?: number;
+    confidence?: number;
+    communication?: number;
+    correctness?: number;
+    feedback?: string;
+  }[];
+}
+
+export interface TechnicalInterviewReport {
+  id: string;
+  role: string;
+  category: string;
+  experience: string;
+  difficulty: string;
+  mode: 'Technical' | 'HR';
+  finalScore: number;
+  confidence: number;
+  communication: number;
+  correctness: number;
+  recommendedPracticeTopics: string[];
+  status: string;
+  createdAt: string;
+  questionWiseScore: QuestionWiseScore[];
+}
+
+export interface InterviewHistoryItem {
+  id: string;
+  role: string;
+  category: string;
+  experience: string;
+  difficulty: string;
+  mode: string;
+  finalScore: number;
+  confidenceAvg: number;
+  communicationAvg: number;
+  correctnessAvg: number;
+  status: string;
+  totalQuestions: number;
+  createdAt: string;
 }

@@ -1,37 +1,54 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext.tsx';
-import { 
-  GitPullRequest, 
-  GitBranch, 
-  GitFork, 
-  GitCommit, 
-  Star, 
-  AlertCircle, 
-  ExternalLink, 
-  Check, 
-  ChevronDown, 
-  ChevronRight, 
-  ArrowRight, 
-  Sparkles, 
-  Calendar, 
-  Users, 
-  BookOpen, 
-  Code2, 
-  Terminal, 
-  FileCode, 
-  Layers, 
-  CheckCircle2, 
-  MessageSquare, 
-  Flame, 
-  Cpu, 
-  ShieldCheck, 
-  Filter, 
-  RefreshCw,
+import {
+  api,
+  githubAuthStorage,
+  type GitHubAnalysis,
+  type GitHubIssueRecommendation,
+  type WeaknessIssueRecommendation,
+  type TechnicalAssessmentQuestion,
+  type TechnicalAssessmentResult,
+  type IdentifiedWeakness,
+} from '../../services/api.ts';
+import {
+  GitPullRequest,
+  GitBranch,
+  GitFork,
+  Star,
+  AlertCircle,
+  ExternalLink,
+  Check,
+  ArrowRight,
+  Sparkles,
   Search,
   Bookmark,
-  Share2,
-  FolderGit2,
-  X
+  Loader2,
+  MapPin,
+  Building2,
+  TrendingUp,
+  BarChart3,
+  Award,
+  ChevronRight,
+  Clock,
+  CircleDot,
+  Info,
+  AlertTriangle,
+  Github,
+  CheckCircle2,
+  XCircle,
+  BookOpen,
+  Code2,
+  Terminal,
+  Layers,
+  RefreshCw,
+  Lock,
+  ChevronLeft,
+  SlidersHorizontal,
+  BookmarkCheck,
+  FileCode,
+  ShieldAlert,
+  Flame,
+  ArrowUpRight,
 } from 'lucide-react';
 
 interface GitHubOpenSourceViewProps {
@@ -39,1501 +56,1305 @@ interface GitHubOpenSourceViewProps {
   onNavigateToCoding?: () => void;
 }
 
+// 5-Stage User Journey Tabs
+type MainTab = 'connect' | 'dashboard' | 'assessment' | 'results' | 'issues';
+type DifficultyFilter = 'all' | 'beginner' | 'intermediate' | 'advanced';
+
+// Loading skeleton component
+const Skeleton: React.FC<{ width?: string; height?: string; className?: string; rounded?: boolean }> = ({
+  width = '100%',
+  height = '16px',
+  className = '',
+  rounded = false,
+}) => (
+  <div
+    className={`skeleton-pulse ${className}`}
+    style={{
+      width,
+      height,
+      backgroundColor: '#E2E8F0',
+      borderRadius: rounded ? '50%' : '8px',
+      animation: 'skeletonPulse 1.5s ease-in-out infinite',
+    }}
+  />
+);
+
+// Format number
+function formatNumber(n: number): string {
+  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return n.toString();
+}
+
+// Time ago helper
+function timeAgo(dateStr: string): string {
+  const now = Date.now();
+  const then = new Date(dateStr).getTime();
+  const diff = now - then;
+  const minutes = Math.floor(diff / 60000);
+  const hours = Math.floor(diff / 3600000);
+  const days = Math.floor(diff / 86400000);
+  const months = Math.floor(diff / 2592000000);
+
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  if (days < 30) return `${days}d ago`;
+  if (months < 12) return `${months}mo ago`;
+  return `${Math.floor(months / 12)}y ago`;
+}
+
 export const GitHubOpenSourceView: React.FC<GitHubOpenSourceViewProps> = ({
   onExploreIssues,
-  onNavigateToCoding
+  onNavigateToCoding,
 }) => {
   const { user } = useAuth();
-  const candidateName = user?.profile?.name || 'Developer';
-  const githubUsername = user?.profile?.github 
-    ? user.profile.github.replace(/https?:\/\/github\.com\/?/, '').replace(/\/$/, '') 
-    : (user?.profile?.name ? user.profile.name.toLowerCase().replace(/\s+/g, '-') : 'developer');
 
-  // Navigation tabs
-  const [activeTab, setActiveTab] = useState<'overview' | 'profile-analysis' | 'skill-matches' | 'issue-recommendations' | 'contribution-roadmap'>('overview');
-  
-  // Connection state
-  const [isConnected, setIsConnected] = useState(true);
+  // --- Active Tab ---
+  const [mainTab, setMainTab] = useState<MainTab>('connect');
 
-  // Timeframe filter for activity
-  const [activityTimeframe, setActivityTimeframe] = useState<'1year' | '6months' | '30days'>('1year');
-  const [isTimeframeDropdownOpen, setIsTimeframeDropdownOpen] = useState(false);
+  // --- Input & Validation ---
+  const [usernameInput, setUsernameInput] = useState('');
+  const [isValidating, setIsValidating] = useState(false);
+  const [validationResult, setValidationResult] = useState<{
+    valid: boolean;
+    username?: string;
+    avatarUrl?: string;
+    name?: string;
+  } | null>(null);
 
-  // Analyzer sub-tabs
-  const [analyzerTab, setAnalyzerTab] = useState<'overview' | 'repositories' | 'contributions' | 'technologies'>('overview');
+  // --- Profile Analysis ---
+  const [analysis, setAnalysis] = useState<GitHubAnalysis | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [analyzedUsername, setAnalyzedUsername] = useState<string>('');
 
-  // Issue filter tabs
-  const [issueFilterTab, setIssueFilterTab] = useState<'recommended' | 'good-first' | 'trending' | 'saved'>('recommended');
+  // --- OAuth State ---
+  const [connectedUser, setConnectedUser] = useState<{
+    username: string;
+    name?: string;
+    avatarUrl: string;
+    bio?: string;
+    publicRepos: number;
+    connectedAt: string;
+  } | null>(null);
+  const [oauthConfigured, setOauthConfigured] = useState<boolean | null>(null);
+  const [isConnectingOAuth, setIsConnectingOAuth] = useState(false);
+  const [showOAuthHelpModal, setShowOAuthHelpModal] = useState(false);
+  const [oauthCallbackUrl, setOauthCallbackUrl] = useState<string>('http://localhost:3000/api/github/oauth/callback');
 
-  // Selected issue for details modal
-  const [selectedIssue, setSelectedIssue] = useState<any | null>(null);
+  // --- 10-Question Technical Assessment State ---
+  const [assessmentId, setAssessmentId] = useState<string | null>(null);
+  const [assessmentQuestions, setAssessmentQuestions] = useState<TechnicalAssessmentQuestion[]>([]);
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [selectedAnswers, setSelectedAnswers] = useState<Record<number, number>>({});
+  const [isStartingAssessment, setIsStartingAssessment] = useState(false);
+  const [isSubmittingAssessment, setIsSubmittingAssessment] = useState(false);
+  const [assessmentResult, setAssessmentResult] = useState<TechnicalAssessmentResult | null>(null);
+  const [showSubmitConfirmModal, setShowSubmitConfirmModal] = useState(false);
 
-  // Selected roadmap step modal
-  const [selectedStep, setSelectedStep] = useState<number | null>(null);
+  // --- Issues & Recommendations ---
+  const [issues, setIssues] = useState<WeaknessIssueRecommendation[]>([]);
+  const [isLoadingIssues, setIsLoadingIssues] = useState(false);
+  const [issueError, setIssueError] = useState<string | null>(null);
+  const [issueTotalCount, setIssueTotalCount] = useState(0);
+  const [weaknessFilter, setWeaknessFilter] = useState<string>('all');
+  const [difficultyFilter, setDifficultyFilter] = useState<DifficultyFilter>('all');
+  const [issueSearchQuery, setIssueSearchQuery] = useState('');
+  const [savedIssueIds, setSavedIssueIds] = useState<Set<string>>(new Set());
 
-  // Interactive saved issues list
-  const [savedIssueIds, setSavedIssueIds] = useState<string[]>([]);
+  // --- Notifications ---
+  const [notification, setNotification] = useState<{
+    type: 'success' | 'error' | 'info';
+    message: string;
+  } | null>(null);
 
-  // Hovered heatmap cell
-  const [hoveredCell, setHoveredCell] = useState<{ date: string; count: number } | null>(null);
+  const showNotification = useCallback((type: 'success' | 'error' | 'info', message: string) => {
+    setNotification({ type, message });
+    setTimeout(() => setNotification(null), 5000);
+  }, []);
 
-  const toggleSaveIssue = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setSavedIssueIds(prev => 
-      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
-    );
-  };
+  // --- Initial Check: OAuth Status & Active Session ---
+  const checkOAuthStatus = useCallback(async () => {
+    try {
+      const [statusRes, userRes] = await Promise.all([
+        api.github.getOAuthStatus().catch(() => ({ success: false, configured: false, callbackUrl: '' })),
+        api.github.getConnectedOAuthUser().catch(() => ({ success: false, connected: false, user: null })),
+      ]);
 
-  // Generate 52 weeks x 7 days mock contribution heatmap
-  const generateHeatmap = () => {
-    const weeks: { date: string; count: number; level: number }[][] = [];
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    
-    // 52 columns
-    for (let w = 0; w < 52; w++) {
-      const days = [];
-      const monthIdx = Math.floor((w / 52) * 12);
-      for (let d = 0; d < 7; d++) {
-        // Deterministic realistic density based on week and day
-        const seed = (w * 7 + d * 13) % 100;
-        let count = 0;
-        let level = 0;
-        
-        if (seed > 85) {
-          count = Math.floor(seed / 8) + 6;
-          level = 4; // dark green
-        } else if (seed > 65) {
-          count = Math.floor(seed / 12) + 3;
-          level = 3; // medium-dark green
-        } else if (seed > 40) {
-          count = Math.floor(seed / 18) + 1;
-          level = 2; // medium green
-        } else if (seed > 20) {
-          count = 1;
-          level = 1; // light green
-        } else {
-          count = 0;
-          level = 0; // empty gray
+      if ('configured' in statusRes) {
+        setOauthConfigured(Boolean(statusRes.configured));
+        if (statusRes.callbackUrl) {
+          setOauthCallbackUrl(statusRes.callbackUrl);
         }
-
-        const dateStr = `${months[monthIdx]} ${((w * 7 + d) % 28) + 1}, 2024`;
-        days.push({ date: dateStr, count, level });
       }
-      weeks.push(days);
+
+      if (userRes.connected && userRes.user) {
+        setConnectedUser(userRes.user);
+        if (!usernameInput) {
+          setUsernameInput(userRes.user.username);
+        }
+      }
+    } catch (err) {
+      console.warn('OAuth status check warning:', err);
     }
-    return weeks;
+  }, [usernameInput]);
+
+  useEffect(() => {
+    checkOAuthStatus();
+  }, [checkOAuthStatus]);
+
+  // --- Auto-fill from user profile ---
+  useEffect(() => {
+    if (user?.profile?.github && !usernameInput) {
+      const clean = user.profile.github.replace(/https?:\/\/github\.com\/?/, '').replace(/\/$/, '');
+      if (clean) setUsernameInput(clean);
+    }
+  }, [user, usernameInput]);
+
+  // --- Listen for OAuth Popup Message & URL query params ---
+  useEffect(() => {
+    function handleMessage(event: MessageEvent) {
+      if (event.data?.type === 'GITHUB_OAUTH_SUCCESS') {
+        const { sessionToken, username, name, avatarUrl } = event.data;
+        if (sessionToken) {
+          githubAuthStorage.setSessionToken(sessionToken);
+        }
+        setConnectedUser({
+          username,
+          name,
+          avatarUrl,
+          publicRepos: 0,
+          connectedAt: new Date().toISOString(),
+        });
+        setIsConnectingOAuth(false);
+        showNotification('success', `GitHub account @${username} connected successfully!`);
+        triggerAnalysis(username);
+      } else if (event.data?.type === 'GITHUB_OAUTH_ERROR') {
+        setIsConnectingOAuth(false);
+        showNotification('error', `GitHub authorization failed: ${event.data.error}`);
+      }
+    }
+
+    window.addEventListener('message', handleMessage);
+
+    const params = new URLSearchParams(window.location.search);
+    const ghConnected = params.get('github_connected');
+    const ghUsername = params.get('username');
+    const ghSessionToken = params.get('session_token');
+    const ghOAuthError = params.get('github_oauth_error');
+
+    if (ghConnected && ghUsername) {
+      if (ghSessionToken) {
+        githubAuthStorage.setSessionToken(ghSessionToken);
+      }
+      setConnectedUser({
+        username: ghUsername,
+        avatarUrl: `https://github.com/${ghUsername}.png`,
+        publicRepos: 0,
+        connectedAt: new Date().toISOString(),
+      });
+      showNotification('success', `Connected GitHub account @${ghUsername}!`);
+      window.history.replaceState({}, document.title, window.location.pathname);
+      triggerAnalysis(ghUsername);
+    } else if (ghOAuthError) {
+      showNotification('error', `GitHub OAuth error: ${ghOAuthError}`);
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+
+    return () => {
+      window.removeEventListener('message', handleMessage);
+    };
+  }, [showNotification]);
+
+  // --- OAuth Handlers ---
+  const handleConnectOAuth = async () => {
+    setIsConnectingOAuth(true);
+    try {
+      const status = await api.github.getOAuthStatus();
+      setOauthConfigured(Boolean(status.configured));
+      if (status.callbackUrl) setOauthCallbackUrl(status.callbackUrl);
+
+      if (!status.configured) {
+        setIsConnectingOAuth(false);
+        setShowOAuthHelpModal(true);
+        return;
+      }
+
+      const res = await api.github.getOAuthAuthorizeUrl();
+      if (!res.success || !res.authUrl) {
+        throw new Error(res.message || 'Could not generate authorization URL.');
+      }
+
+      const width = 600;
+      const height = 750;
+      const left = window.screenX + (window.outerWidth - width) / 2;
+      const top = window.screenY + (window.outerHeight - height) / 2;
+      const popup = window.open(
+        res.authUrl,
+        'github_oauth_popup',
+        `width=${width},height=${height},left=${left},top=${top},status=no,menubar=no,toolbar=no`
+      );
+
+      if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+        window.location.href = res.authUrl;
+      } else {
+        const checkClosed = setInterval(() => {
+          if (popup.closed) {
+            clearInterval(checkClosed);
+            setIsConnectingOAuth(false);
+          }
+        }, 1000);
+      }
+    } catch (err: any) {
+      showNotification('error', err.message || 'Failed to initiate GitHub authorization.');
+      setIsConnectingOAuth(false);
+    }
   };
 
-  const heatmapWeeks = React.useMemo(() => generateHeatmap(), []);
-
-  // Level color mapping
-  const getLevelColor = (lvl: number) => {
-    switch (lvl) {
-      case 1: return '#86EFAC';
-      case 2: return '#4ADE80';
-      case 3: return '#22C55E';
-      case 4: return '#15803D';
-      default: return '#E2E8F0';
+  const handleDisconnectOAuth = async () => {
+    try {
+      await api.github.disconnectOAuthUser();
+    } catch (e) {
+      console.warn('Disconnect error:', e);
+    } finally {
+      githubAuthStorage.removeSessionToken();
+      setConnectedUser(null);
+      showNotification('info', 'GitHub account disconnected.');
     }
   };
 
-  // Issue recommendations data
-  const issuesData = [
-    {
-      id: 'issue-1',
-      repo: 'vercel / next.js',
-      repoUrl: 'https://github.com/vercel/next.js',
-      logoType: 'vercel',
-      title: 'Improve documentation for App Router',
-      tags: ['documentation', 'good first issue'],
-      matchScore: 94,
-      comments: 12,
-      updated: '2 days ago',
-      category: 'good-first',
-      description: 'The current documentation for parallel routing in the App Router lacks examples with complex error boundaries and loading states.',
-      difficulty: 'Beginner Friendly',
-      prerequisites: ['Next.js 14', 'Markdown', 'TypeScript'],
-      fileToEdit: 'docs/02-app/02-api-reference/04-functions/parallel-routes.md'
-    },
-    {
-      id: 'issue-2',
-      repo: 'mui / material-ui',
-      repoUrl: 'https://github.com/mui/material-ui',
-      logoType: 'mui',
-      title: 'Add dark mode example in docs',
-      tags: ['documentation', 'React', 'TypeScript'],
-      matchScore: 89,
-      comments: 8,
-      updated: '3 days ago',
-      category: 'recommended',
-      description: 'Expand the ThemeProvider documentation by adding an interactive live code sandbox showing persistent dark/light theme switching with CSS variables.',
-      difficulty: 'Intermediate',
-      prerequisites: ['React', 'CSS Variables', 'TypeScript'],
-      fileToEdit: 'docs/src/pages/customization/dark-mode.js'
-    },
-    {
-      id: 'issue-3',
-      repo: 'supabase / supabase',
-      repoUrl: 'https://github.com/supabase/supabase',
-      logoType: 'supabase',
-      title: 'Improve error handling in Auth module',
-      tags: ['TypeScript', 'backend', 'good first issue'],
-      matchScore: 86,
-      comments: 15,
-      updated: '4 days ago',
-      category: 'good-first',
-      description: 'When OAuth tokens fail validation on network timeout, ensure proper catch handlers normalize the error code and trigger the fallback refresh loop.',
-      difficulty: 'Intermediate',
-      prerequisites: ['TypeScript', 'Go / Auth APIs', 'Jest'],
-      fileToEdit: 'packages/gotrue/src/GoTrueClient.ts'
-    }
-  ];
+  // --- Profile Validation ---
+  const handleValidateUsername = async () => {
+    if (!usernameInput.trim()) return;
+    setIsValidating(true);
+    setValidationResult(null);
 
-  // Roadmap steps details
-  const roadmapSteps = [
-    {
-      step: 1,
-      title: 'Understand Repository',
-      desc: 'Read README, explore the codebase, understand the project.',
-      color: '#2563EB',
-      icon: <MessageSquare size={18} />,
-      details: [
-        'Check the project CONTRIBUTING.md file for code conventions.',
-        'Review the existing pull request templates and discussion forums.',
-        'Look at closed issues to understand the maintainers tone and preferred architecture.'
-      ],
-      cmd: 'git clone https://github.com/organization/project.git'
-    },
-    {
-      step: 2,
-      title: 'Setup Locally',
-      desc: 'Fork the repo and set it up on your local machine.',
-      color: '#10B981',
-      icon: <Terminal size={18} />,
-      details: [
-        'Fork the repository directly to your personal GitHub account.',
-        'Clone your fork locally and configure the upstream remote repository.',
-        'Install dependencies via npm, yarn, or pnpm and verify the development build.'
-      ],
-      cmd: 'git remote add upstream https://github.com/original/project.git'
-    },
-    {
-      step: 3,
-      title: 'Select Issue',
-      desc: 'Choose a suitable issue based on your skills.',
-      color: '#8B5CF6',
-      icon: <Layers size={18} />,
-      details: [
-        'Look for issues labeled "good first issue", "help wanted", or "documentation".',
-        'Drop a comment asking if the issue is still open for contributions.',
-        'Confirm scope with the maintainer before diving into heavy code changes.'
-      ],
-      cmd: '# Comment on issue: "Hi @maintainer, I would love to work on this!"'
-    },
-    {
-      step: 4,
-      title: 'Create Branch',
-      desc: 'Create a new branch for your changes.',
-      color: '#F97316',
-      icon: <GitBranch size={18} />,
-      details: [
-        'Ensure your main branch is synchronized with upstream/main.',
-        'Create a dedicated feature or bugfix branch with a descriptive name.',
-        'Never commit directly to your local main branch.'
-      ],
-      cmd: 'git checkout -b fix/auth-error-handling'
-    },
-    {
-      step: 5,
-      title: 'Implement',
-      desc: 'Write code, follow guidelines and make changes.',
-      color: '#EF4444',
-      icon: <Code2 size={18} />,
-      details: [
-        'Keep changes minimal and strictly focused on resolving the issue.',
-        'Follow existing code formatting styles and ESLint/Prettier configs.',
-        'Write concise, descriptive commit messages adhering to Conventional Commits.'
-      ],
-      cmd: 'git commit -m "fix(auth): normalize network timeout error responses"'
-    },
-    {
-      step: 6,
-      title: 'Test',
-      desc: 'Run tests and ensure everything works.',
-      color: '#14B8A6',
-      icon: <CheckCircle2 size={18} />,
-      details: [
-        'Run the test suite locally (e.g. npm test, pytest, vitest).',
-        'Add new test cases that cover the bug or feature you implemented.',
-        'Ensure build and type-checking scripts pass without any warnings.'
-      ],
-      cmd: 'npm run test && npm run lint'
-    },
-    {
-      step: 7,
-      title: 'Create Pull Request',
-      desc: 'Submit your changes and describe them clearly.',
-      color: '#2563EB',
-      icon: <GitPullRequest size={18} />,
-      details: [
-        'Push your branch to your personal fork on GitHub.',
-        'Open a pull request referencing the issue number (e.g. "Closes #142").',
-        'Respond constructively to maintainer review comments and suggestions.'
-      ],
-      cmd: 'git push origin fix/auth-error-handling'
+    try {
+      const res = await api.github.validateUsername(usernameInput.trim());
+      setValidationResult(res);
+      if (!res.valid) {
+        showNotification('error', res.message || 'GitHub user not found.');
+      }
+    } catch (err: any) {
+      setValidationResult({ valid: false });
+      showNotification('error', err.message || 'Failed to validate username.');
+    } finally {
+      setIsValidating(false);
     }
-  ];
+  };
 
-  const filteredIssues = issuesData.filter(issue => {
-    if (issueFilterTab === 'recommended') return true;
-    if (issueFilterTab === 'good-first') return issue.category === 'good-first';
-    if (issueFilterTab === 'saved') return savedIssueIds.includes(issue.id);
-    return true;
-  });
+  // --- Profile Analysis ---
+  const triggerAnalysis = async (targetHandle?: string, forceRefresh = false) => {
+    const handle = targetHandle || validationResult?.username || usernameInput.trim();
+    if (!handle) {
+      showNotification('error', 'Please enter a GitHub username to analyze.');
+      return;
+    }
+
+    setIsAnalyzing(true);
+    setAnalysisError(null);
+
+    try {
+      const res = await api.github.analyzeProfile(handle, forceRefresh);
+      if (res.success && res.data) {
+        setAnalysis(res.data);
+        setAnalyzedUsername(res.data.profile.login);
+        setMainTab('dashboard');
+        showNotification(
+          'success',
+          res.cached
+            ? `Profile loaded from cache for @${res.data.profile.login}`
+            : `Successfully analyzed @${res.data.profile.login}'s GitHub repositories!`
+        );
+      } else {
+        throw new Error(res.message || 'Could not analyze GitHub profile.');
+      }
+    } catch (err: any) {
+      setAnalysisError(err.message || 'Failed to analyze GitHub profile.');
+      showNotification('error', err.message || 'Failed to analyze GitHub profile.');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  // --- 10-Question Technical Assessment Handlers ---
+  const handleStartAssessment = async () => {
+    const handle = analyzedUsername || connectedUser?.username || usernameInput.trim();
+    if (!handle) {
+      showNotification('error', 'Please analyze a profile before starting the assessment.');
+      return;
+    }
+
+    setIsStartingAssessment(true);
+    try {
+      const res = await api.github.startAssessment(handle);
+      if (res.success && res.data) {
+        setAssessmentId(res.data.assessmentId);
+        setAssessmentQuestions(res.data.questions);
+        setCurrentQuestionIndex(0);
+        setSelectedAnswers({});
+        setAssessmentResult(null);
+        setMainTab('assessment');
+        showNotification('success', `Generated 10 personalized questions for @${handle}!`);
+      } else {
+        throw new Error(res.message || 'Failed to generate assessment.');
+      }
+    } catch (err: any) {
+      showNotification('error', err.message || 'Could not start technical assessment.');
+    } finally {
+      setIsStartingAssessment(false);
+    }
+  };
+
+  const handleSelectAnswer = (questionId: number, optionIndex: number) => {
+    setSelectedAnswers(prev => ({
+      ...prev,
+      [questionId]: optionIndex,
+    }));
+  };
+
+  const answeredCount = useMemo(() => {
+    return Object.keys(selectedAnswers).length;
+  }, [selectedAnswers]);
+
+  const handleSubmitAssessment = async () => {
+    if (!assessmentId) return;
+
+    setShowSubmitConfirmModal(false);
+    setIsSubmittingAssessment(true);
+
+    const answersPayload = assessmentQuestions.map(q => ({
+      questionId: q.id,
+      selectedOptionIndex: selectedAnswers[q.id] !== undefined ? selectedAnswers[q.id] : -1,
+    }));
+
+    try {
+      const res = await api.github.submitAssessment(assessmentId, answersPayload);
+      if (res.success && res.data) {
+        setAssessmentResult(res.data);
+        setMainTab('results');
+        showNotification(
+          'success',
+          `Assessment evaluated! Score: ${res.data.score}/${res.data.totalQuestions} (${res.data.percentage}%).`
+        );
+        // Automatically fetch open-source issues targeting the identified weaknesses
+        fetchWeaknessIssues(res.data.weaknesses);
+      } else {
+        throw new Error(res.message || 'Failed to evaluate assessment.');
+      }
+    } catch (err: any) {
+      showNotification('error', err.message || 'Failed to submit assessment.');
+    } finally {
+      setIsSubmittingAssessment(false);
+    }
+  };
+
+  // --- Fetch Issues for Weaknesses ---
+  const fetchWeaknessIssues = async (
+    weaknessesList?: IdentifiedWeakness[],
+    filterTopic = weaknessFilter,
+    diff = difficultyFilter
+  ) => {
+    setIsLoadingIssues(true);
+    setIssueError(null);
+
+    const targetWeaknesses = weaknessesList || assessmentResult?.weaknesses || [];
+
+    try {
+      const res = await api.github.getWeaknessIssues({
+        assessmentId: assessmentId || undefined,
+        weaknesses: targetWeaknesses,
+        username: analyzedUsername || connectedUser?.username,
+        difficulty: diff === 'all' ? undefined : diff,
+        weaknessTopic: filterTopic === 'all' ? undefined : filterTopic,
+        perPage: 12,
+      });
+
+      if (res.success && res.data) {
+        setIssues(res.data.issues);
+        setIssueTotalCount(res.data.totalCount);
+      } else {
+        throw new Error(res.message || 'Failed to fetch issues.');
+      }
+    } catch (err: any) {
+      setIssueError(err.message || 'Failed to fetch recommendations.');
+    } finally {
+      setIsLoadingIssues(false);
+    }
+  };
+
+  // Filtered issues for search query
+  const filteredIssues = useMemo(() => {
+    if (!issueSearchQuery.trim()) return issues;
+    const q = issueSearchQuery.toLowerCase();
+    return issues.filter(
+      item =>
+        item.title.toLowerCase().includes(q) ||
+        item.repo.toLowerCase().includes(q) ||
+        item.weaknessAddressed.toLowerCase().includes(q) ||
+        item.labels.some(l => l.toLowerCase().includes(q))
+    );
+  }, [issues, issueSearchQuery]);
+
+  const toggleSaveIssue = (id: string) => {
+    setSavedIssueIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   return (
-    <div className="container-fluid p-3 p-md-4 max-w-7xl mx-auto" style={{ backgroundColor: '#F8FAFC' }}>
-      
-      {/* 1. Header Banner & Motivational Quote */}
-      <div className="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-3 mb-4">
-        {/* Left: Icon, Title & Subtitle */}
-        <div className="d-flex align-items-center gap-3">
-          <div 
-            className="d-flex align-items-center justify-content-center rounded-3 shadow-xs flex-shrink-0"
-            style={{ 
-              width: '52px', 
-              height: '52px', 
-              backgroundColor: '#DBEAFE',
-              color: '#0F172A'
-            }}
-          >
-            {/* GitHub Octocat / Branch Icon */}
-            <svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor">
-              <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" />
-            </svg>
-          </div>
-          <div>
-            <h1 className="fw-bold text-dark fs-4 mb-0.5" style={{ color: '#0F172A', letterSpacing: '-0.02em' }}>
-              GitHub & Open Source
-            </h1>
-            <p className="text-secondary small mb-0" style={{ color: '#64748B' }}>
-              Connect your GitHub, analyze your profile, discover opportunities and grow as a developer.
-            </p>
-          </div>
-        </div>
-
-        {/* Right: Motivational Quote Box */}
-        <div 
-          className="card border-0 rounded-3 p-2.5 px-3.5 d-flex flex-row align-items-center gap-3 shadow-xs"
-          style={{ 
-            backgroundColor: '#EFF6FF', 
-            border: '1px solid #DBEAFE',
-            maxWidth: '430px'
+    <div className="container-fluid px-3 px-md-4 py-4" style={{ maxWidth: '1400px' }}>
+      {/* Toast Notification */}
+      {notification && (
+        <div
+          className={`position-fixed bottom-0 end-0 m-4 p-3 rounded-4 shadow-lg d-flex align-items-center gap-3 text-white`}
+          style={{
+            zIndex: 1090,
+            backgroundColor:
+              notification.type === 'success' ? '#059669' : notification.type === 'error' ? '#DC2626' : '#2563EB',
+            maxWidth: '420px',
+            animation: 'slideUp 0.3s ease-out',
           }}
         >
-          <div 
-            className="rounded-circle d-flex align-items-center justify-content-center flex-shrink-0"
-            style={{ width: '38px', height: '38px', backgroundColor: '#DBEAFE', color: '#2563EB' }}
-          >
-            <Sparkles size={20} className="text-primary" />
+          {notification.type === 'success' && <CheckCircle2 size={20} />}
+          {notification.type === 'error' && <AlertCircle size={20} />}
+          {notification.type === 'info' && <Info size={20} />}
+          <div className="flex-grow-1" style={{ fontSize: '0.88rem', fontWeight: 500 }}>
+            {notification.message}
           </div>
-          <div className="lh-sm">
-            <div className="fw-bold text-primary small" style={{ fontSize: '0.86rem' }}>
-              “Contribute today. Build tomorrow.”
-            </div>
-            <div className="text-secondary small mt-0.5" style={{ fontSize: '0.74rem', color: '#64748B' }}>
-              Open source experience makes you a better developer.
-            </div>
-          </div>
+          <button
+            type="button"
+            className="btn-close btn-close-white"
+            onClick={() => setNotification(null)}
+          />
         </div>
-      </div>
+      )}
 
-      {/* 2. Sub-navigation Tabs */}
-      <div className="card bg-white border rounded-3 shadow-xs mb-4 p-0 overflow-hidden" style={{ borderColor: '#E2E8F0' }}>
-        <div className="d-flex border-bottom px-3 pt-1 bg-white overflow-x-auto" style={{ borderColor: '#E2E8F0' }}>
-          {[
-            { key: 'overview', label: 'Overview' },
-            { key: 'profile-analysis', label: 'Profile Analysis' },
-            { key: 'skill-matches', label: 'Skill Matches' },
-            { key: 'issue-recommendations', label: 'Issue Recommendations' },
-            { key: 'contribution-roadmap', label: 'Contribution Roadmap' }
-          ].map(tab => (
-            <button
-              key={tab.key}
-              type="button"
-              onClick={() => setActiveTab(tab.key as any)}
-              className={`btn btn-link text-decoration-none py-2.5 px-4 fw-semibold position-relative border-0 rounded-0 text-nowrap ${
-                activeTab === tab.key ? 'text-primary' : 'text-secondary'
-              }`}
-              style={{ fontSize: '0.88rem' }}
+      {/* Main Feature Header */}
+      <div className="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center mb-4 gap-3">
+        <div>
+          <div className="d-flex align-items-center gap-2 mb-1">
+            <span
+              className="badge px-3 py-1 rounded-pill"
+              style={{ backgroundColor: '#EEF2FF', color: '#4F46E5', fontWeight: 600, fontSize: '0.75rem' }}
             >
-              {tab.label}
-              {activeTab === tab.key && (
-                <div 
-                  className="position-absolute bottom-0 start-0 end-0 bg-primary" 
-                  style={{ height: '2.5px', borderRadius: '2px 2px 0 0' }} 
-                />
-              )}
-            </button>
-          ))}
+              SkillNexus Intelligence
+            </span>
+            {connectedUser && (
+              <span
+                className="badge px-2.5 py-1 rounded-pill d-flex align-items-center gap-1"
+                style={{ backgroundColor: '#ECFDF5', color: '#059669', fontSize: '0.75rem' }}
+              >
+                <CheckCircle2 size={12} /> Connected: @{connectedUser.username}
+              </span>
+            )}
+          </div>
+          <h1 className="fw-bold mb-1" style={{ fontSize: '1.75rem', color: '#0F172A', letterSpacing: '-0.02em' }}>
+            GitHub Intelligence & Technical Assessment
+          </h1>
+          <p className="text-secondary mb-0" style={{ fontSize: '0.92rem' }}>
+            Connect your account or analyze public repositories, take a personalized 10-question assessment, pinpoint weaknesses, and contribute to targeted open-source issues.
+          </p>
         </div>
+
+        {connectedUser ? (
+          <div className="d-flex align-items-center gap-2">
+            <button
+              type="button"
+              onClick={() => triggerAnalysis(connectedUser.username, true)}
+              disabled={isAnalyzing}
+              className="btn btn-outline-primary rounded-3 px-3 py-2 d-flex align-items-center gap-2"
+              style={{ fontSize: '0.85rem' }}
+            >
+              <RefreshCw size={15} className={isAnalyzing ? 'spin' : ''} />
+              Refresh Analysis
+            </button>
+            <button
+              type="button"
+              onClick={handleDisconnectOAuth}
+              className="btn btn-outline-danger rounded-3 px-3 py-2"
+              style={{ fontSize: '0.85rem' }}
+            >
+              Disconnect
+            </button>
+          </div>
+        ) : null}
       </div>
 
-      {/* 3. Top Row Cards: F31 Connect Your GitHub | GitHub Activity | Top Languages */}
-      <div className="row g-3 mb-4">
-        
-        {/* Card F31: Connect Your GitHub (3.5 col) */}
-        <div className="col-lg-3 col-xl-3">
-          <div className="card bg-white border rounded-4 p-3.5 shadow-xs h-100 d-flex flex-column" style={{ borderColor: '#E2E8F0' }}>
-            
-            {/* Header with F31 Badge */}
-            <div className="d-flex align-items-start gap-2 mb-3">
-              <span 
-                className="badge fw-bold text-white rounded-2 px-2 py-1 flex-shrink-0"
-                style={{ backgroundColor: '#2563EB', fontSize: '0.72rem' }}
-              >
-                F31
-              </span>
+      {/* 5-Step Workflow Pipeline Navigation Tabs */}
+      <div className="bg-white rounded-4 p-2 shadow-xs mb-4 border d-flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => setMainTab('connect')}
+          className={`btn rounded-3 px-3 py-2 fw-medium d-flex align-items-center gap-2 transition-all ${
+            mainTab === 'connect' ? 'btn-primary text-white shadow-xs' : 'btn-light text-secondary'
+          }`}
+          style={{ fontSize: '0.85rem' }}
+        >
+          <Github size={16} />
+          <span>1. Connect & Profile</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setMainTab('dashboard')}
+          disabled={!analysis}
+          className={`btn rounded-3 px-3 py-2 fw-medium d-flex align-items-center gap-2 transition-all ${
+            mainTab === 'dashboard' ? 'btn-primary text-white shadow-xs' : 'btn-light text-secondary'
+          }`}
+          style={{ fontSize: '0.85rem', opacity: !analysis ? 0.6 : 1 }}
+        >
+          <BarChart3 size={16} />
+          <span>2. Profile Intelligence</span>
+          {analysis && (
+            <span className="badge rounded-pill bg-white text-primary px-2" style={{ fontSize: '0.7rem' }}>
+              Ready
+            </span>
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            if (assessmentQuestions.length === 0) {
+              handleStartAssessment();
+            } else {
+              setMainTab('assessment');
+            }
+          }}
+          disabled={!analysis && assessmentQuestions.length === 0}
+          className={`btn rounded-3 px-3 py-2 fw-medium d-flex align-items-center gap-2 transition-all ${
+            mainTab === 'assessment' ? 'btn-primary text-white shadow-xs' : 'btn-light text-secondary'
+          }`}
+          style={{ fontSize: '0.85rem', opacity: !analysis && assessmentQuestions.length === 0 ? 0.6 : 1 }}
+        >
+          <Code2 size={16} />
+          <span>3. 10-Question Assessment</span>
+          {assessmentQuestions.length > 0 && (
+            <span
+              className="badge rounded-pill px-2"
+              style={{
+                backgroundColor: mainTab === 'assessment' ? 'rgba(255,255,255,0.25)' : '#EEF2FF',
+                color: mainTab === 'assessment' ? '#FFFFFF' : '#4F46E5',
+                fontSize: '0.7rem',
+              }}
+            >
+              {answeredCount}/10
+            </span>
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setMainTab('results')}
+          disabled={!assessmentResult}
+          className={`btn rounded-3 px-3 py-2 fw-medium d-flex align-items-center gap-2 transition-all ${
+            mainTab === 'results' ? 'btn-primary text-white shadow-xs' : 'btn-light text-secondary'
+          }`}
+          style={{ fontSize: '0.85rem', opacity: !assessmentResult ? 0.6 : 1 }}
+        >
+          <ShieldAlert size={16} />
+          <span>4. Weakness Analysis</span>
+          {assessmentResult && (
+            <span className="badge rounded-pill bg-warning-subtle text-warning-emphasis px-2" style={{ fontSize: '0.7rem' }}>
+              {assessmentResult.weaknesses.length} Gaps
+            </span>
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setMainTab('issues');
+            if (issues.length === 0) fetchWeaknessIssues();
+          }}
+          disabled={!analysis && !assessmentResult}
+          className={`btn rounded-3 px-3 py-2 fw-medium d-flex align-items-center gap-2 transition-all ${
+            mainTab === 'issues' ? 'btn-primary text-white shadow-xs' : 'btn-light text-secondary'
+          }`}
+          style={{ fontSize: '0.85rem', opacity: !analysis && !assessmentResult ? 0.6 : 1 }}
+        >
+          <GitPullRequest size={16} />
+          <span>5. Open Source Recommendations</span>
+          {issues.length > 0 && (
+            <span
+              className="badge rounded-pill px-2"
+              style={{
+                backgroundColor: mainTab === 'issues' ? 'rgba(255,255,255,0.25)' : '#DCFCE7',
+                color: mainTab === 'issues' ? '#FFFFFF' : '#15803D',
+                fontSize: '0.7rem',
+              }}
+            >
+              {issues.length}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* ========================================================================= */}
+      {/* 1. CONNECT & PROFILE TAB                                                   */}
+      {/* ========================================================================= */}
+      {mainTab === 'connect' && (
+        <div className="row g-4">
+          {/* Option A: Real GitHub OAuth Connection Card */}
+          <div className="col-12 col-lg-6">
+            <div className="card h-100 rounded-4 p-4 p-md-5 border shadow-sm bg-white d-flex flex-column justify-content-between">
               <div>
-                <h2 className="fw-bold text-dark small mb-0.5" style={{ fontSize: '0.92rem' }}>
-                  Connect Your GitHub
-                </h2>
-                <p className="text-secondary small mb-0" style={{ fontSize: '0.72rem', lineHeight: '1.3' }}>
-                  Link your GitHub account to analyze your repositories, contributions and skills.
-                </p>
-              </div>
-            </div>
-
-            {/* Profile Box */}
-            <div className="p-3 rounded-3 border mb-3" style={{ backgroundColor: '#F8FAFC', borderColor: '#E2E8F0' }}>
-              <div className="d-flex align-items-center gap-2.5 mb-2">
-                {/* User Avatar */}
-                <div 
-                  className="rounded-circle overflow-hidden flex-shrink-0 border"
-                  style={{ width: '42px', height: '42px', borderColor: '#CBD5E1' }}
-                >
-                  <img 
-                    src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80" 
-                    alt="Rohan Singh"
-                    className="w-100 h-100 object-fit-cover"
-                  />
-                </div>
-
-                <div className="lh-sm flex-grow-1">
-                  <div className="d-flex align-items-center gap-1.5">
-                    <span className="fw-bold text-dark small" style={{ fontSize: '0.86rem' }}>
-                      {githubUsername}
-                    </span>
-                    <span 
-                      className="badge rounded-pill fw-medium d-inline-flex align-items-center gap-1"
-                      style={{ backgroundColor: '#DCFCE7', color: '#15803D', fontSize: '0.66rem', padding: '3px 7px' }}
-                    >
-                      <Check size={10} strokeWidth={3} /> Connected
-                    </span>
-                  </div>
-                  <div className="text-secondary small" style={{ fontSize: '0.75rem' }}>
-                    {candidateName}
-                  </div>
-                  <div className="text-muted d-flex align-items-center gap-1 mt-0.5" style={{ fontSize: '0.7rem' }}>
-                    <Calendar size={11} /> Active Contributor
-                  </div>
-                </div>
-              </div>
-
-              {/* 3 Metric counters */}
-              <div className="row g-2 text-center pt-2 border-top" style={{ borderColor: '#E2E8F0' }}>
-                <div className="col-4">
-                  <div className="fw-bold text-dark" style={{ fontSize: '1.05rem' }}>128</div>
-                  <div className="text-secondary" style={{ fontSize: '0.68rem' }}>Repositories</div>
-                </div>
-                <div className="col-4 border-start border-end" style={{ borderColor: '#E2E8F0' }}>
-                  <div className="fw-bold text-dark" style={{ fontSize: '1.05rem' }}>342</div>
-                  <div className="text-secondary" style={{ fontSize: '0.68rem' }}>Followers</div>
-                </div>
-                <div className="col-4">
-                  <div className="fw-bold text-dark" style={{ fontSize: '1.05rem' }}>286</div>
-                  <div className="text-secondary" style={{ fontSize: '0.68rem' }}>Following</div>
-                </div>
-              </div>
-            </div>
-
-            {/* Disconnect / Connect Button */}
-            <div className="mt-auto">
-              <button
-                type="button"
-                onClick={() => setIsConnected(!isConnected)}
-                className="btn btn-sm btn-outline-secondary w-100 rounded-3 py-1.5 fw-semibold"
-                style={{ fontSize: '0.78rem', borderColor: '#CBD5E1', color: '#475569' }}
-              >
-                {isConnected ? 'Disconnect' : 'Connect GitHub'}
-              </button>
-            </div>
-
-          </div>
-        </div>
-
-        {/* Card: GitHub Activity (Heatmap) (5.8 col) */}
-        <div className="col-lg-6 col-xl-6">
-          <div className="card bg-white border rounded-4 p-3.5 shadow-xs h-100 d-flex flex-column" style={{ borderColor: '#E2E8F0' }}>
-            
-            {/* Header & Dropdown */}
-            <div className="d-flex align-items-center justify-content-between mb-1">
-              <h2 className="fw-bold text-dark small mb-0" style={{ fontSize: '0.94rem' }}>
-                GitHub Activity
-              </h2>
-              
-              <div className="dropdown position-relative">
-                <button
-                  type="button"
-                  onClick={() => setIsTimeframeDropdownOpen(!isTimeframeDropdownOpen)}
-                  className="btn btn-sm btn-light border rounded-2 px-2.5 py-1 text-secondary d-flex align-items-center gap-1.5"
-                  style={{ fontSize: '0.74rem', backgroundColor: '#FFFFFF', borderColor: '#E2E8F0' }}
-                >
-                  <span>{activityTimeframe === '1year' ? 'Last 1 year' : activityTimeframe === '6months' ? 'Last 6 months' : 'Last 30 days'}</span>
-                  <ChevronDown size={13} />
-                </button>
-
-                {isTimeframeDropdownOpen && (
-                  <div 
-                    className="position-absolute end-0 mt-1 card shadow-md border rounded-2 p-1 z-3"
-                    style={{ width: '130px', borderColor: '#E2E8F0' }}
+                <div className="d-flex align-items-center justify-content-between mb-3">
+                  <div
+                    className="rounded-3 p-3 d-flex align-items-center justify-content-center"
+                    style={{ backgroundColor: '#0F172A', color: '#FFFFFF', width: '56px', height: '56px' }}
                   >
-                    {[
-                      { key: '1year', label: 'Last 1 year' },
-                      { key: '6months', label: 'Last 6 months' },
-                      { key: '30days', label: 'Last 30 days' }
-                    ].map(opt => (
-                      <button
-                        key={opt.key}
-                        type="button"
-                        onClick={() => {
-                          setActivityTimeframe(opt.key as any);
-                          setIsTimeframeDropdownOpen(false);
-                        }}
-                        className={`btn btn-sm text-start w-100 rounded-1 px-2 py-1 small ${
-                          activityTimeframe === opt.key ? 'bg-primary text-white' : 'text-dark hover-bg-light'
-                        }`}
-                        style={{ fontSize: '0.74rem' }}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
+                    <Github size={28} />
+                  </div>
+                  {connectedUser ? (
+                    <span className="badge bg-success-subtle text-success-emphasis px-3 py-2 rounded-pill fw-semibold">
+                      <CheckCircle2 size={13} className="me-1 inline" /> Account Authorized
+                    </span>
+                  ) : (
+                    <span className="badge bg-primary-subtle text-primary-emphasis px-3 py-2 rounded-pill fw-semibold">
+                      Option A · Direct OAuth
+                    </span>
+                  )}
+                </div>
+
+                <h2 className="fw-bold text-dark mb-2" style={{ fontSize: '1.35rem' }}>
+                  Connect Your GitHub Account
+                </h2>
+                <p className="text-secondary mb-4" style={{ fontSize: '0.9rem', lineHeight: '1.6' }}>
+                  Authorize SkillNexus AI with your personal GitHub account to inspect both public and private repositories with high API rate limits.
+                </p>
+
+                {connectedUser ? (
+                  <div className="p-3 rounded-4 border bg-light mb-4 d-flex align-items-center gap-3">
+                    <img
+                      src={connectedUser.avatarUrl}
+                      alt={connectedUser.username}
+                      className="rounded-circle border"
+                      style={{ width: '52px', height: '52px' }}
+                    />
+                    <div className="flex-grow-1">
+                      <h4 className="fw-bold mb-0 text-dark" style={{ fontSize: '1rem' }}>
+                        {connectedUser.name || connectedUser.username}
+                      </h4>
+                      <p className="text-secondary mb-0" style={{ fontSize: '0.8rem' }}>
+                        @{connectedUser.username} · Authorized via GitHub
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-4 mb-4" style={{ backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0' }}>
+                    <div className="d-flex align-items-center gap-2 mb-1 fw-semibold text-dark" style={{ fontSize: '0.85rem' }}>
+                      <Lock size={15} className="text-primary" />
+                      Strict Security & Minimal Scopes
+                    </div>
+                    <p className="mb-0 text-secondary" style={{ fontSize: '0.8rem', lineHeight: '1.5' }}>
+                      We only request standard read permissions to fetch repository languages, topics, and stars. We never write code or modify your settings.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                {connectedUser ? (
+                  <div className="d-flex flex-column gap-2">
+                    <button
+                      type="button"
+                      onClick={() => triggerAnalysis(connectedUser.username)}
+                      disabled={isAnalyzing}
+                      className="btn btn-primary rounded-3 py-3 fw-semibold d-flex align-items-center justify-content-center gap-2 shadow-xs"
+                      style={{ backgroundColor: '#2563EB', border: 'none' }}
+                    >
+                      {isAnalyzing ? <Loader2 size={18} className="spin" /> : <Sparkles size={18} />}
+                      Analyze My Connected Profile
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDisconnectOAuth}
+                      className="btn btn-outline-secondary rounded-3 py-2 fw-medium text-muted"
+                      style={{ fontSize: '0.85rem' }}
+                    >
+                      Disconnect GitHub Account
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleConnectOAuth}
+                    disabled={isConnectingOAuth}
+                    className="btn w-100 rounded-3 py-3 fw-semibold text-white d-flex align-items-center justify-content-center gap-2 shadow-xs"
+                    style={{ backgroundColor: '#0F172A', border: 'none', fontSize: '0.95rem' }}
+                  >
+                    {isConnectingOAuth ? (
+                      <>
+                        <Loader2 size={20} className="spin" />
+                        Connecting to GitHub...
+                      </>
+                    ) : (
+                      <>
+                        <Github size={20} />
+                        Connect GitHub Account
+                      </>
+                    )}
+                  </button>
+                )}
+
+                {oauthConfigured === false && !connectedUser && (
+                  <div className="mt-3 text-center">
+                    <button
+                      type="button"
+                      onClick={() => setShowOAuthHelpModal(true)}
+                      className="btn btn-link text-decoration-none p-0 text-secondary"
+                      style={{ fontSize: '0.8rem' }}
+                    >
+                      <Info size={13} className="me-1 inline" /> Admin OAuth Setup Guide
+                    </button>
                   </div>
                 )}
               </div>
             </div>
-
-            <p className="text-secondary small mb-2.5" style={{ fontSize: '0.74rem' }}>
-              1,482 contributions in the last year
-            </p>
-
-            {/* Contribution Heatmap Canvas */}
-            <div className="p-2 rounded-3 border mb-3 overflow-x-auto" style={{ backgroundColor: '#FAFAFA', borderColor: '#F1F5F9' }}>
-              <div className="d-flex gap-1" style={{ minWidth: '460px' }}>
-                {heatmapWeeks.map((week, wIdx) => (
-                  <div key={wIdx} className="d-flex flex-column gap-1">
-                    {week.map((day, dIdx) => (
-                      <div
-                        key={dIdx}
-                        onMouseEnter={() => setHoveredCell({ date: day.date, count: day.count })}
-                        onMouseLeave={() => setHoveredCell(null)}
-                        className="rounded-1 cursor-pointer transition-all hover-scale"
-                        style={{
-                          width: '7.5px',
-                          height: '7.5px',
-                          backgroundColor: getLevelColor(day.level)
-                        }}
-                        title={`${day.count} contributions on ${day.date}`}
-                      />
-                    ))}
-                  </div>
-                ))}
-              </div>
-
-              {/* Month Labels & Legend */}
-              <div className="d-flex align-items-center justify-content-between mt-2 pt-1 border-top" style={{ borderColor: '#F1F5F9', fontSize: '0.66rem', color: '#94A3B8' }}>
-                <div className="d-flex justify-content-between flex-grow-1 pe-4">
-                  {['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].map((m, idx) => (
-                    <span key={idx}>{m}</span>
-                  ))}
-                </div>
-
-                <div className="d-flex align-items-center gap-1 flex-shrink-0 ms-2">
-                  <span>Less</span>
-                  <div className="rounded-1" style={{ width: '7.5px', height: '7.5px', backgroundColor: '#E2E8F0' }} />
-                  <div className="rounded-1" style={{ width: '7.5px', height: '7.5px', backgroundColor: '#86EFAC' }} />
-                  <div className="rounded-1" style={{ width: '7.5px', height: '7.5px', backgroundColor: '#4ADE80' }} />
-                  <div className="rounded-1" style={{ width: '7.5px', height: '7.5px', backgroundColor: '#22C55E' }} />
-                  <div className="rounded-1" style={{ width: '7.5px', height: '7.5px', backgroundColor: '#15803D' }} />
-                  <span>More</span>
-                </div>
-              </div>
-
-              {/* Hover Tooltip feedback */}
-              {hoveredCell && (
-                <div className="text-center pt-1 text-primary fw-medium" style={{ fontSize: '0.7rem' }}>
-                  {hoveredCell.count} contributions on {hoveredCell.date}
-                </div>
-              )}
-            </div>
-
-            {/* 4 Bottom Stats */}
-            <div className="row g-2 text-center mt-auto">
-              <div className="col-3">
-                <div className="fw-bold text-dark fs-5">42</div>
-                <div className="text-secondary" style={{ fontSize: '0.68rem', lineHeight: '1.2' }}>
-                  Contributions<br />(last 30 days)
-                </div>
-              </div>
-              <div className="col-3 border-start" style={{ borderColor: '#F1F5F9' }}>
-                <div className="fw-bold text-dark fs-5">12</div>
-                <div className="text-secondary" style={{ fontSize: '0.68rem', lineHeight: '1.2' }}>
-                  Active<br />repositories
-                </div>
-              </div>
-              <div className="col-3 border-start" style={{ borderColor: '#F1F5F9' }}>
-                <div className="fw-bold text-dark fs-5">8</div>
-                <div className="text-secondary" style={{ fontSize: '0.68rem', lineHeight: '1.2' }}>
-                  Pull<br />requests
-                </div>
-              </div>
-              <div className="col-3 border-start" style={{ borderColor: '#F1F5F9' }}>
-                <div className="fw-bold text-dark fs-5">6</div>
-                <div className="text-secondary" style={{ fontSize: '0.68rem', lineHeight: '1.2' }}>
-                  Issues<br />opened
-                </div>
-              </div>
-            </div>
-
           </div>
-        </div>
 
-        {/* Card: Top Languages (Donut Chart) (3.2 col) */}
-        <div className="col-lg-3 col-xl-3">
-          <div className="card bg-white border rounded-4 p-3.5 shadow-xs h-100 d-flex flex-column" style={{ borderColor: '#E2E8F0' }}>
-            
-            <h2 className="fw-bold text-dark small mb-3" style={{ fontSize: '0.94rem' }}>
-              Top Languages
-            </h2>
-
-            <div className="row g-2 align-items-center my-auto">
-              
-              {/* Donut Chart SVG with 128 Repositories center */}
-              <div className="col-6 text-center">
-                <div className="position-relative d-inline-flex align-items-center justify-content-center" style={{ width: '120px', height: '120px' }}>
-                  <svg className="w-100 h-100" viewBox="0 0 100 100" style={{ transform: 'rotate(-90deg)' }}>
-                    {/* JavaScript 34.2% */}
-                    <circle
-                      cx="50"
-                      cy="50"
-                      r="36"
-                      fill="transparent"
-                      stroke="#F59E0B"
-                      strokeWidth="12"
-                      strokeDasharray="226"
-                      strokeDashoffset={226 * (1 - 0.342)}
-                    />
-                    {/* TypeScript 22.1% */}
-                    <circle
-                      cx="50"
-                      cy="50"
-                      r="36"
-                      fill="transparent"
-                      stroke="#3B82F6"
-                      strokeWidth="12"
-                      strokeDasharray="226"
-                      strokeDashoffset={226 * (1 - 0.221)}
-                      style={{ transform: 'rotate(123deg)', transformOrigin: '50% 50%' }}
-                    />
-                    {/* Python 16.8% */}
-                    <circle
-                      cx="50"
-                      cy="50"
-                      r="36"
-                      fill="transparent"
-                      stroke="#10B981"
-                      strokeWidth="12"
-                      strokeDasharray="226"
-                      strokeDashoffset={226 * (1 - 0.168)}
-                      style={{ transform: 'rotate(203deg)', transformOrigin: '50% 50%' }}
-                    />
-                    {/* Java 10.4% */}
-                    <circle
-                      cx="50"
-                      cy="50"
-                      r="36"
-                      fill="transparent"
-                      stroke="#F97316"
-                      strokeWidth="12"
-                      strokeDasharray="226"
-                      strokeDashoffset={226 * (1 - 0.104)}
-                      style={{ transform: 'rotate(263deg)', transformOrigin: '50% 50%' }}
-                    />
-                    {/* HTML 8.1% */}
-                    <circle
-                      cx="50"
-                      cy="50"
-                      r="36"
-                      fill="transparent"
-                      stroke="#EF4444"
-                      strokeWidth="12"
-                      strokeDasharray="226"
-                      strokeDashoffset={226 * (1 - 0.081)}
-                      style={{ transform: 'rotate(301deg)', transformOrigin: '50% 50%' }}
-                    />
-                    {/* CSS 5.2% */}
-                    <circle
-                      cx="50"
-                      cy="50"
-                      r="36"
-                      fill="transparent"
-                      stroke="#8B5CF6"
-                      strokeWidth="12"
-                      strokeDasharray="226"
-                      strokeDashoffset={226 * (1 - 0.052)}
-                      style={{ transform: 'rotate(330deg)', transformOrigin: '50% 50%' }}
-                    />
-                    {/* Others 3.2% */}
-                    <circle
-                      cx="50"
-                      cy="50"
-                      r="36"
-                      fill="transparent"
-                      stroke="#94A3B8"
-                      strokeWidth="12"
-                      strokeDasharray="226"
-                      strokeDashoffset={226 * (1 - 0.032)}
-                      style={{ transform: 'rotate(349deg)', transformOrigin: '50% 50%' }}
-                    />
-                  </svg>
-
-                  {/* Center Text */}
-                  <div className="position-absolute text-center lh-1">
-                    <div className="fw-bold text-dark fs-5">128</div>
-                    <div className="text-secondary" style={{ fontSize: '0.62rem' }}>Repositories</div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Legend List */}
-              <div className="col-6">
-                <div className="d-flex flex-column gap-1.5" style={{ fontSize: '0.74rem' }}>
-                  
-                  <div className="d-flex align-items-center justify-content-between">
-                    <div className="d-flex align-items-center gap-1.5">
-                      <div className="rounded-circle" style={{ width: '8px', height: '8px', backgroundColor: '#F59E0B' }} />
-                      <span className="text-dark">JavaScript</span>
-                    </div>
-                    <span className="fw-bold text-dark">34.2%</span>
-                  </div>
-
-                  <div className="d-flex align-items-center justify-content-between">
-                    <div className="d-flex align-items-center gap-1.5">
-                      <div className="rounded-circle" style={{ width: '8px', height: '8px', backgroundColor: '#3B82F6' }} />
-                      <span className="text-dark">TypeScript</span>
-                    </div>
-                    <span className="fw-bold text-dark">22.1%</span>
-                  </div>
-
-                  <div className="d-flex align-items-center justify-content-between">
-                    <div className="d-flex align-items-center gap-1.5">
-                      <div className="rounded-circle" style={{ width: '8px', height: '8px', backgroundColor: '#10B981' }} />
-                      <span className="text-dark">Python</span>
-                    </div>
-                    <span className="fw-bold text-dark">16.8%</span>
-                  </div>
-
-                  <div className="d-flex align-items-center justify-content-between">
-                    <div className="d-flex align-items-center gap-1.5">
-                      <div className="rounded-circle" style={{ width: '8px', height: '8px', backgroundColor: '#F97316' }} />
-                      <span className="text-dark">Java</span>
-                    </div>
-                    <span className="fw-bold text-dark">10.4%</span>
-                  </div>
-
-                  <div className="d-flex align-items-center justify-content-between">
-                    <div className="d-flex align-items-center gap-1.5">
-                      <div className="rounded-circle" style={{ width: '8px', height: '8px', backgroundColor: '#EF4444' }} />
-                      <span className="text-dark">HTML</span>
-                    </div>
-                    <span className="fw-bold text-dark">8.1%</span>
-                  </div>
-
-                  <div className="d-flex align-items-center justify-content-between">
-                    <div className="d-flex align-items-center gap-1.5">
-                      <div className="rounded-circle" style={{ width: '8px', height: '8px', backgroundColor: '#8B5CF6' }} />
-                      <span className="text-dark">CSS</span>
-                    </div>
-                    <span className="fw-bold text-dark">5.2%</span>
-                  </div>
-
-                  <div className="d-flex align-items-center justify-content-between">
-                    <div className="d-flex align-items-center gap-1.5">
-                      <div className="rounded-circle" style={{ width: '8px', height: '8px', backgroundColor: '#94A3B8' }} />
-                      <span className="text-dark">Others</span>
-                    </div>
-                    <span className="fw-bold text-dark">3.2%</span>
-                  </div>
-
-                </div>
-              </div>
-
-            </div>
-
-          </div>
-        </div>
-
-      </div>
-
-      {/* 4. Middle Row: F32 GitHub Profile Analyzer | F33 Skill Extraction | F34 Open-Source Issues */}
-      <div className="row g-3 mb-4">
-        
-        {/* Card F32: GitHub Profile Analyzer (Col 4) */}
-        <div className="col-lg-4">
-          <div className="card bg-white border rounded-4 p-3.5 shadow-xs h-100 d-flex flex-column" style={{ borderColor: '#E2E8F0' }}>
-            
-            {/* Header with F32 Badge */}
-            <div className="d-flex align-items-start gap-2 mb-2">
-              <span 
-                className="badge fw-bold text-white rounded-2 px-2 py-1 flex-shrink-0"
-                style={{ backgroundColor: '#2563EB', fontSize: '0.72rem' }}
-              >
-                F32
-              </span>
+          {/* Option B: Public Profile Analysis Card */}
+          <div className="col-12 col-lg-6">
+            <div className="card h-100 rounded-4 p-4 p-md-5 border shadow-sm bg-white d-flex flex-column justify-content-between">
               <div>
-                <h2 className="fw-bold text-dark small mb-0.5" style={{ fontSize: '0.92rem' }}>
-                  GitHub Profile Analyzer
-                </h2>
-                <p className="text-secondary small mb-0" style={{ fontSize: '0.72rem' }}>
-                  AI analyzes your GitHub profile and activity.
-                </p>
-              </div>
-            </div>
-
-            {/* Sub-tabs */}
-            <div className="d-flex border-bottom mb-3" style={{ borderColor: '#E2E8F0' }}>
-              {[
-                { key: 'overview', label: 'Overview' },
-                { key: 'repositories', label: 'Repositories' },
-                { key: 'contributions', label: 'Contributions' },
-                { key: 'technologies', label: 'Technologies' }
-              ].map(tab => (
-                <button
-                  key={tab.key}
-                  type="button"
-                  onClick={() => setAnalyzerTab(tab.key as any)}
-                  className={`btn btn-link text-decoration-none py-1.5 px-2.5 fw-semibold border-0 rounded-0 position-relative small ${
-                    analyzerTab === tab.key ? 'text-primary' : 'text-secondary'
-                  }`}
-                  style={{ fontSize: '0.74rem' }}
-                >
-                  {tab.label}
-                  {analyzerTab === tab.key && (
-                    <div className="position-absolute bottom-0 start-0 end-0 bg-primary" style={{ height: '2px' }} />
-                  )}
-                </button>
-              ))}
-            </div>
-
-            {/* 6 Quick Stat Tiles (2 rows x 3 columns) */}
-            <div className="row g-2 mb-3">
-              
-              {/* Tile 1: Repositories */}
-              <div className="col-4">
-                <div className="p-2 rounded-3 border text-center h-100" style={{ backgroundColor: '#F8FAFC', borderColor: '#E2E8F0' }}>
-                  <div className="text-primary mb-0.5"><FolderGit2 size={16} /></div>
-                  <div className="fw-bold text-dark" style={{ fontSize: '0.96rem' }}>128</div>
-                  <div className="text-secondary" style={{ fontSize: '0.64rem' }}>Repositories</div>
-                  <div className="text-success fw-semibold" style={{ fontSize: '0.62rem' }}>+12 this year</div>
-                </div>
-              </div>
-
-              {/* Tile 2: Contributions */}
-              <div className="col-4">
-                <div className="p-2 rounded-3 border text-center h-100" style={{ backgroundColor: '#F8FAFC', borderColor: '#E2E8F0' }}>
-                  <div className="text-success mb-0.5"><Calendar size={16} /></div>
-                  <div className="fw-bold text-dark" style={{ fontSize: '0.96rem' }}>1,482</div>
-                  <div className="text-secondary" style={{ fontSize: '0.64rem' }}>Contributions</div>
-                  <div className="text-success fw-semibold" style={{ fontSize: '0.62rem' }}>+28% increase</div>
-                </div>
-              </div>
-
-              {/* Tile 3: Active Streak */}
-              <div className="col-4">
-                <div className="p-2 rounded-3 border text-center h-100" style={{ backgroundColor: '#F8FAFC', borderColor: '#E2E8F0' }}>
-                  <div className="text-danger mb-0.5"><Flame size={16} /></div>
-                  <div className="fw-bold text-dark" style={{ fontSize: '0.96rem' }}>24</div>
-                  <div className="text-secondary" style={{ fontSize: '0.64rem' }}>Active Streak</div>
-                  <div className="text-secondary" style={{ fontSize: '0.62rem' }}>days</div>
-                </div>
-              </div>
-
-              {/* Tile 4: Pull Requests */}
-              <div className="col-4">
-                <div className="p-2 rounded-3 border text-center h-100" style={{ backgroundColor: '#F8FAFC', borderColor: '#E2E8F0' }}>
-                  <div className="text-primary mb-0.5"><GitPullRequest size={16} /></div>
-                  <div className="fw-bold text-dark" style={{ fontSize: '0.96rem' }}>8</div>
-                  <div className="text-secondary" style={{ fontSize: '0.64rem' }}>Pull Requests</div>
-                  <div className="text-success fw-semibold" style={{ fontSize: '0.62rem' }}>5 merged</div>
-                </div>
-              </div>
-
-              {/* Tile 5: Issues Opened */}
-              <div className="col-4">
-                <div className="p-2 rounded-3 border text-center h-100" style={{ backgroundColor: '#F8FAFC', borderColor: '#E2E8F0' }}>
-                  <div className="text-danger mb-0.5"><AlertCircle size={16} /></div>
-                  <div className="fw-bold text-dark" style={{ fontSize: '0.96rem' }}>12</div>
-                  <div className="text-secondary" style={{ fontSize: '0.64rem' }}>Issues Opened</div>
-                  <div className="text-success fw-semibold" style={{ fontSize: '0.62rem' }}>4 closed</div>
-                </div>
-              </div>
-
-              {/* Tile 6: Technologies Detected */}
-              <div className="col-4">
-                <div className="p-2 rounded-3 border text-center h-100" style={{ backgroundColor: '#F8FAFC', borderColor: '#E2E8F0' }}>
-                  <div className="text-purple mb-0.5" style={{ color: '#8B5CF6' }}><Cpu size={16} /></div>
-                  <div className="fw-bold text-dark" style={{ fontSize: '0.96rem' }}>18</div>
-                  <div className="text-secondary" style={{ fontSize: '0.64rem' }}>Technologies</div>
-                  <div className="text-secondary" style={{ fontSize: '0.62rem' }}>Detected</div>
-                </div>
-              </div>
-
-            </div>
-
-            {/* Recent Activity List */}
-            <div className="mt-auto">
-              <div className="d-flex align-items-center justify-content-between mb-2">
-                <span className="fw-bold text-dark small" style={{ fontSize: '0.82rem' }}>
-                  Recent Activity
-                </span>
-                <a href="#all-activity" className="text-primary text-decoration-none fw-semibold small d-flex align-items-center gap-1" style={{ fontSize: '0.72rem' }}>
-                  <span>View All Activity</span>
-                  <ArrowRight size={12} />
-                </a>
-              </div>
-
-              <div className="d-flex flex-column gap-2" style={{ fontSize: '0.74rem' }}>
-                
-                {/* Activity 1 */}
-                <div className="d-flex align-items-center justify-content-between">
-                  <div className="d-flex align-items-center gap-2">
-                    <GitCommit size={14} className="text-secondary flex-shrink-0" />
-                    <span>Pushed to <strong className="text-primary">portfolio-website</strong></span>
-                  </div>
-                  <span className="text-muted" style={{ fontSize: '0.68rem' }}>2 hours ago</span>
-                </div>
-
-                {/* Activity 2 */}
-                <div className="d-flex align-items-center justify-content-between">
-                  <div className="d-flex align-items-center gap-2">
-                    <GitPullRequest size={14} className="text-secondary flex-shrink-0" />
-                    <span>Merged PR #42 in <strong className="text-primary">open-source-ui</strong></span>
-                  </div>
-                  <span className="text-muted" style={{ fontSize: '0.68rem' }}>1 day ago</span>
-                </div>
-
-                {/* Activity 3 */}
-                <div className="d-flex align-items-center justify-content-between">
-                  <div className="d-flex align-items-center gap-2">
-                    <AlertCircle size={14} className="text-secondary flex-shrink-0" />
-                    <span>Opened issue in <strong className="text-primary">awesome-project</strong></span>
-                  </div>
-                  <span className="text-muted" style={{ fontSize: '0.68rem' }}>2 days ago</span>
-                </div>
-
-                {/* Activity 4 */}
-                <div className="d-flex align-items-center justify-content-between">
-                  <div className="d-flex align-items-center gap-2">
-                    <Star size={14} className="text-secondary flex-shrink-0" />
-                    <span>Starred <strong className="text-primary">vercel/next.js</strong></span>
-                  </div>
-                  <span className="text-muted" style={{ fontSize: '0.68rem' }}>3 days ago</span>
-                </div>
-
-                {/* Activity 5 */}
-                <div className="d-flex align-items-center justify-content-between">
-                  <div className="d-flex align-items-center gap-2">
-                    <GitFork size={14} className="text-secondary flex-shrink-0" />
-                    <span>Forked <strong className="text-primary">tailwindlabs/tailwindcss</strong></span>
-                  </div>
-                  <span className="text-muted" style={{ fontSize: '0.68rem' }}>5 days ago</span>
-                </div>
-
-              </div>
-            </div>
-
-          </div>
-        </div>
-
-        {/* Card F33: Skill Extraction (Col 4) */}
-        <div className="col-lg-4">
-          <div className="card bg-white border rounded-4 p-3.5 shadow-xs h-100 d-flex flex-column" style={{ borderColor: '#E2E8F0' }}>
-            
-            {/* Header with F33 Badge */}
-            <div className="d-flex align-items-start gap-2 mb-2">
-              <span 
-                className="badge fw-bold text-white rounded-2 px-2 py-1 flex-shrink-0"
-                style={{ backgroundColor: '#2563EB', fontSize: '0.72rem' }}
-              >
-                F33
-              </span>
-              <div>
-                <h2 className="fw-bold text-dark small mb-0.5" style={{ fontSize: '0.92rem' }}>
-                  Skill Extraction
-                </h2>
-                <p className="text-secondary small mb-0" style={{ fontSize: '0.72rem' }}>
-                  Combine resume and GitHub to build a stronger skill profile.
-                </p>
-              </div>
-            </div>
-
-            {/* Skills From Resume vs Skills From GitHub (Two columns with arrow) */}
-            <div className="position-relative mb-3">
-              <div className="row g-2">
-                
-                {/* Skills from Resume */}
-                <div className="col-6">
-                  <div className="p-2 rounded-3 border h-100" style={{ backgroundColor: '#F8FAFC', borderColor: '#E2E8F0' }}>
-                    <div className="fw-bold text-dark mb-1.5" style={{ fontSize: '0.74rem' }}>
-                      Skills from Resume
-                    </div>
-                    <div className="d-flex flex-wrap gap-1">
-                      {['React', 'Node.js', 'MongoDB', 'JavaScript', 'HTML', 'CSS', 'Git', 'Express.js', 'Problem Solving', 'Teamwork'].map((s, i) => (
-                        <span 
-                          key={i} 
-                          className="badge rounded-pill fw-medium"
-                          style={{ backgroundColor: '#F1F5F9', color: '#334155', fontSize: '0.66rem', border: '1px solid #E2E8F0' }}
-                        >
-                          {s}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Skills from GitHub */}
-                <div className="col-6">
-                  <div className="p-2 rounded-3 border h-100" style={{ backgroundColor: '#EFF6FF', borderColor: '#DBEAFE' }}>
-                    <div className="fw-bold text-primary mb-1.5" style={{ fontSize: '0.74rem' }}>
-                      Skills from GitHub
-                    </div>
-                    <div className="d-flex flex-wrap gap-1">
-                      {['TypeScript', 'Next.js', 'Python', 'Docker', 'AWS', 'PostgreSQL', 'Tailwind CSS', 'CI/CD', 'Open Source', 'System Design'].map((s, i) => (
-                        <span 
-                          key={i} 
-                          className="badge rounded-pill fw-medium"
-                          style={{ backgroundColor: '#DBEAFE', color: '#1E40AF', fontSize: '0.66rem' }}
-                        >
-                          {s}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-              </div>
-
-              {/* Connecting Arrow -> */}
-              <div 
-                className="position-absolute top-50 start-50 translate-middle rounded-circle bg-white border shadow-xs d-flex align-items-center justify-content-center text-primary"
-                style={{ width: '22px', height: '22px', borderColor: '#CBD5E1', zIndex: 2 }}
-              >
-                <ArrowRight size={12} />
-              </div>
-            </div>
-
-            {/* Downward Arrow ↓ */}
-            <div className="text-center my-1 text-primary">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="12" y1="5" x2="12" y2="19"></line>
-                <polyline points="19 12 12 19 5 12"></polyline>
-              </svg>
-            </div>
-
-            {/* Verified / Observed Skills */}
-            <div className="p-2.5 rounded-3 border mb-3" style={{ backgroundColor: '#FFFFFF', borderColor: '#E2E8F0' }}>
-              <div className="d-flex align-items-center gap-1.5 mb-2">
-                <div 
-                  className="rounded-circle d-flex align-items-center justify-content-center text-white"
-                  style={{ width: '16px', height: '16px', backgroundColor: '#10B981' }}
-                >
-                  <Check size={11} strokeWidth={3} />
-                </div>
-                <span className="fw-bold text-dark" style={{ fontSize: '0.78rem' }}>
-                  Verified/Observed Skills
-                </span>
-              </div>
-
-              <div className="d-flex flex-wrap gap-1">
-                {[
-                  'JavaScript', 'TypeScript', 'React', 'Next.js', 'Node.js', 
-                  'Python', 'MongoDB', 'PostgreSQL', 'Docker', 'AWS', 
-                  'Git', 'HTML', 'CSS', 'Tailwind CSS', 'CI/CD', 
-                  'System Design', 'Open Source', 'Problem Solving'
-                ].map((skill, idx) => (
-                  <span 
-                    key={idx}
-                    className="badge rounded-pill fw-medium"
-                    style={{ 
-                      backgroundColor: '#F8FAFC', 
-                      color: '#0F172A', 
-                      border: '1px solid #E2E8F0',
-                      fontSize: '0.67rem',
-                      padding: '4px 8px'
-                    }}
+                <div className="d-flex align-items-center justify-content-between mb-3">
+                  <div
+                    className="rounded-3 p-3 d-flex align-items-center justify-content-center"
+                    style={{ backgroundColor: '#2563EB', color: '#FFFFFF', width: '56px', height: '56px' }}
                   >
-                    {skill}
+                    <Search size={28} />
+                  </div>
+                  <span className="badge bg-secondary-subtle text-secondary-emphasis px-3 py-2 rounded-pill fw-semibold">
+                    Option B · Public Analysis
                   </span>
-                ))}
-              </div>
-            </div>
+                </div>
 
-            {/* Bottom Green Callout Box */}
-            <div 
-              className="p-2 px-3 rounded-3 d-flex align-items-center gap-2 border mt-auto"
-              style={{ backgroundColor: '#F0FDF4', borderColor: '#DCFCE7' }}
-            >
-              <div 
-                className="rounded-circle d-flex align-items-center justify-content-center text-white flex-shrink-0"
-                style={{ width: '18px', height: '18px', backgroundColor: '#10B981' }}
-              >
-                <Check size={12} strokeWidth={3} />
-              </div>
-              <span className="small text-dark" style={{ fontSize: '0.74rem' }}>
-                Your skill profile is <strong className="text-success">63% stronger</strong> with GitHub data!
-              </span>
-            </div>
-
-          </div>
-        </div>
-
-        {/* Card F34: Open-Source Issue Recommendations (Col 4) */}
-        <div className="col-lg-4">
-          <div className="card bg-white border rounded-4 p-3.5 shadow-xs h-100 d-flex flex-column" style={{ borderColor: '#E2E8F0' }}>
-            
-            {/* Header with F34 Badge */}
-            <div className="d-flex align-items-start gap-2 mb-2">
-              <span 
-                className="badge fw-bold text-white rounded-2 px-2 py-1 flex-shrink-0"
-                style={{ backgroundColor: '#2563EB', fontSize: '0.72rem' }}
-              >
-                F34
-              </span>
-              <div>
-                <h2 className="fw-bold text-dark small mb-0.5" style={{ fontSize: '0.92rem' }}>
-                  Open-Source Issue Recommendations
+                <h2 className="fw-bold text-dark mb-2" style={{ fontSize: '1.35rem' }}>
+                  Analyze Any Public Profile
                 </h2>
-                <p className="text-secondary small mb-0" style={{ fontSize: '0.72rem' }}>
-                  AI finds the best issues for you based on your skills and interests.
+                <p className="text-secondary mb-4" style={{ fontSize: '0.9rem', lineHeight: '1.6' }}>
+                  Enter any public GitHub username or URL to analyze public repositories, tech stacks, and generate a personalized 10-question assessment immediately without OAuth login.
                 </p>
-              </div>
-            </div>
 
-            {/* Filter Tabs */}
-            <div className="d-flex border-bottom mb-2.5 overflow-x-auto" style={{ borderColor: '#E2E8F0' }}>
-              {[
-                { key: 'recommended', label: 'Recommended' },
-                { key: 'good-first', label: 'Good First Issues' },
-                { key: 'trending', label: 'Trending' },
-                { key: 'saved', label: 'Saved' }
-              ].map(tab => (
-                <button
-                  key={tab.key}
-                  type="button"
-                  onClick={() => setIssueFilterTab(tab.key as any)}
-                  className={`btn btn-link text-decoration-none py-1.5 px-2 fw-semibold border-0 rounded-0 position-relative text-nowrap ${
-                    issueFilterTab === tab.key ? 'text-primary' : 'text-secondary'
-                  }`}
-                  style={{ fontSize: '0.74rem' }}
-                >
-                  {tab.label}
-                  {issueFilterTab === tab.key && (
-                    <div className="position-absolute bottom-0 start-0 end-0 bg-primary" style={{ height: '2px' }} />
-                  )}
-                </button>
-              ))}
-            </div>
-
-            {/* Issue Cards List */}
-            <div className="d-flex flex-column gap-2 mb-2 flex-grow-1">
-              {filteredIssues.map((issue) => (
-                <div 
-                  key={issue.id}
-                  className="p-2.5 rounded-3 border hover-shadow transition-all bg-white"
-                  style={{ borderColor: '#E2E8F0' }}
-                >
-                  {/* Top line: Logo, Repo name & Skill Match badge */}
-                  <div className="d-flex align-items-center justify-content-between mb-1.5">
-                    <div className="d-flex align-items-center gap-2">
-                      {/* Repo Logo */}
-                      <div 
-                        className="rounded-circle d-flex align-items-center justify-content-center text-white flex-shrink-0"
-                        style={{ 
-                          width: '28px', 
-                          height: '28px', 
-                          backgroundColor: issue.logoType === 'vercel' ? '#000000' : issue.logoType === 'mui' ? '#007FFF' : '#1C1C1C' 
-                        }}
-                      >
-                        {issue.logoType === 'vercel' && (
-                          <svg width="14" height="14" viewBox="0 0 115 100" fill="currentColor">
-                            <path d="M57.5 0L115 100H0L57.5 0Z" />
-                          </svg>
-                        )}
-                        {issue.logoType === 'mui' && (
-                          <span className="fw-bold" style={{ fontSize: '0.75rem' }}>M</span>
-                        )}
-                        {issue.logoType === 'supabase' && (
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="#24B47E">
-                            <path d="M21.362 9.354H12V.396a.396.396 0 00-.716-.233L2.203 12.424a.396.396 0 00.323.642H12v8.958a.396.396 0 00.716.233l9.081-12.261a.396.396 0 00-.323-.642z"/>
-                          </svg>
-                        )}
+                {/* Input and Verify */}
+                <div className="mb-3">
+                  <label className="form-label text-dark fw-semibold small mb-2">GitHub Username or Profile URL</label>
+                  <div className="d-flex gap-2">
+                    <div className="position-relative flex-grow-1">
+                      <div className="position-absolute top-50 translate-middle-y ps-3 text-muted">
+                        <Github size={18} />
                       </div>
-
-                      <span className="text-secondary small fw-medium" style={{ fontSize: '0.76rem' }}>
-                        {issue.repo}
-                      </span>
+                      <input
+                        type="text"
+                        value={usernameInput}
+                        onChange={e => {
+                          setUsernameInput(e.target.value);
+                          setValidationResult(null);
+                        }}
+                        onKeyDown={e => e.key === 'Enter' && handleValidateUsername()}
+                        placeholder="e.g. torvalds or octocat"
+                        className="form-control rounded-3 py-2.5 ps-5 border"
+                        style={{ fontSize: '0.9rem' }}
+                      />
                     </div>
-
-                    <span 
-                      className="badge rounded-pill fw-bold"
-                      style={{ backgroundColor: '#DCFCE7', color: '#15803D', fontSize: '0.68rem', padding: '3px 8px' }}
-                    >
-                      {issue.matchScore}% Skill Match
-                    </span>
-                  </div>
-
-                  {/* Issue Title */}
-                  <h3 
-                    onClick={() => setSelectedIssue(issue)}
-                    className="fw-bold text-dark small mb-1.5 cursor-pointer hover-text-primary" 
-                    style={{ fontSize: '0.82rem', lineHeight: '1.3' }}
-                  >
-                    {issue.title}
-                  </h3>
-
-                  {/* Tags */}
-                  <div className="d-flex flex-wrap gap-1 mb-2">
-                    {issue.tags.map((tag, tIdx) => (
-                      <span 
-                        key={tIdx}
-                        className="badge rounded-pill"
-                        style={{ backgroundColor: '#EFF6FF', color: '#2563EB', fontSize: '0.64rem', padding: '2px 7px' }}
-                      >
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-
-                  {/* Footer Meta: comments, updated date, and View Issue button */}
-                  <div className="d-flex align-items-center justify-content-between pt-1 border-top" style={{ borderColor: '#F1F5F9', fontSize: '0.7rem', color: '#64748B' }}>
-                    <div className="d-flex align-items-center gap-2.5">
-                      <span className="d-flex align-items-center gap-1">
-                        <MessageSquare size={12} /> {issue.comments} comments
-                      </span>
-                      <span>Updated {issue.updated}</span>
-                    </div>
-
                     <button
                       type="button"
-                      onClick={() => setSelectedIssue(issue)}
-                      className="btn btn-primary btn-sm rounded-2 py-1 px-2.5 fw-semibold border-0"
-                      style={{ fontSize: '0.72rem', backgroundColor: '#2563EB' }}
+                      onClick={handleValidateUsername}
+                      disabled={isValidating || !usernameInput.trim()}
+                      className="btn btn-outline-secondary rounded-3 px-3 fw-medium d-flex align-items-center gap-1 flex-shrink-0"
+                      style={{ fontSize: '0.88rem' }}
                     >
-                      View Issue
+                      {isValidating ? <Loader2 size={16} className="spin" /> : <Search size={16} />}
+                      Verify
                     </button>
                   </div>
-
-                </div>
-              ))}
-            </div>
-
-            {/* Bottom Link: View More Issues */}
-            <div className="text-end mt-auto pt-1">
-              <a 
-                href="#more-issues" 
-                onClick={(e) => {
-                  e.preventDefault();
-                  setActiveTab('issue-recommendations');
-                }}
-                className="text-primary fw-semibold small text-decoration-none d-inline-flex align-items-center gap-1"
-                style={{ fontSize: '0.76rem' }}
-              >
-                <span>View More Issues</span>
-                <ArrowRight size={13} />
-              </a>
-            </div>
-
-          </div>
-        </div>
-
-      </div>
-
-      {/* 5. Bottom Row: Card F35: Contribution Roadmap */}
-      <div className="card bg-white border rounded-4 p-4 shadow-xs mb-3" style={{ borderColor: '#E2E8F0' }}>
-        
-        {/* Header with F35 Badge */}
-        <div className="d-flex align-items-start gap-2 mb-4">
-          <span 
-            className="badge fw-bold text-white rounded-2 px-2 py-1 flex-shrink-0"
-            style={{ backgroundColor: '#2563EB', fontSize: '0.72rem' }}
-          >
-            F35
-          </span>
-          <div>
-            <h2 className="fw-bold text-dark small mb-0.5" style={{ fontSize: '0.94rem' }}>
-              Contribution Roadmap
-            </h2>
-            <p className="text-secondary small mb-0" style={{ fontSize: '0.74rem' }}>
-              Step-by-step guide to make your first (or next) open-source contribution.
-            </p>
-          </div>
-        </div>
-
-        {/* 7 Interactive Steps in linear flow */}
-        <div className="d-flex align-items-center justify-content-between overflow-x-auto pb-2 gap-2">
-          {roadmapSteps.map((step, idx) => (
-            <React.Fragment key={step.step}>
-              {/* Step Tile */}
-              <div 
-                onClick={() => setSelectedStep(step.step)}
-                className="text-center p-2.5 rounded-3 cursor-pointer transition-all hover-shadow"
-                style={{ 
-                  width: '135px', 
-                  flexShrink: 0,
-                  backgroundColor: '#FFFFFF',
-                  border: '1px solid #F1F5F9'
-                }}
-              >
-                {/* Icon Container */}
-                <div 
-                  className="rounded-3 d-inline-flex align-items-center justify-content-center text-white mb-2 shadow-xs"
-                  style={{ width: '38px', height: '38px', backgroundColor: step.color }}
-                >
-                  {step.icon}
                 </div>
 
-                {/* Step Subtitle */}
-                <div className="text-muted small" style={{ fontSize: '0.68rem' }}>
-                  Step {step.step}
-                </div>
-
-                {/* Step Title */}
-                <div className="fw-bold text-dark mb-1" style={{ fontSize: '0.8rem', lineHeight: '1.2' }}>
-                  {step.title}
-                </div>
-
-                {/* Step Description */}
-                <div className="text-secondary small" style={{ fontSize: '0.68rem', lineHeight: '1.3' }}>
-                  {step.desc}
-                </div>
+                {/* Validation Status Box */}
+                {validationResult && (
+                  <div
+                    className={`rounded-3 p-3 mb-4 d-flex align-items-center gap-3 border ${
+                      validationResult.valid ? 'bg-success-subtle text-success-emphasis border-success-subtle' : 'bg-danger-subtle text-danger-emphasis border-danger-subtle'
+                    }`}
+                  >
+                    {validationResult.valid ? (
+                      <>
+                        <img
+                          src={validationResult.avatarUrl}
+                          alt={validationResult.username}
+                          className="rounded-circle border"
+                          style={{ width: '42px', height: '42px' }}
+                        />
+                        <div className="flex-grow-1">
+                          <div className="fw-bold" style={{ fontSize: '0.9rem' }}>
+                            {validationResult.name || validationResult.username}
+                          </div>
+                          <div className="small text-muted">@{validationResult.username}</div>
+                        </div>
+                        <CheckCircle2 size={20} className="text-success" />
+                      </>
+                    ) : (
+                      <>
+                        <AlertCircle size={20} className="text-danger flex-shrink-0" />
+                        <div className="small flex-grow-1">
+                          {validationResult.message || 'GitHub username not found. Please verify spelling.'}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
 
-              {/* Connecting Arrow (between items) */}
-              {idx < roadmapSteps.length - 1 && (
-                <div className="text-muted flex-shrink-0 px-1" style={{ color: '#CBD5E1' }}>
-                  <ArrowRight size={18} />
-                </div>
-              )}
-            </React.Fragment>
-          ))}
-        </div>
-
-        {/* Bottom Callout Banner */}
-        <div 
-          className="rounded-3 p-2.5 px-3.5 d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mt-4"
-          style={{ backgroundColor: '#F0FDF4', border: '1px solid #DCFCE7' }}
-        >
-          <div className="d-flex align-items-center gap-2.5">
-            <div 
-              className="rounded-circle d-flex align-items-center justify-content-center text-white flex-shrink-0"
-              style={{ width: '22px', height: '22px', backgroundColor: '#10B981' }}
-            >
-              <Check size={14} strokeWidth={3} />
-            </div>
-            <span className="small text-dark fw-medium" style={{ fontSize: '0.82rem' }}>
-              You're ready to contribute! Start with a "good first issue" to get hands-on experience.
-            </span>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => {
-              setIssueFilterTab('good-first');
-              const el = document.getElementById('issue-recommendations-section');
-              if (el) el.scrollIntoView({ behavior: 'smooth' });
-            }}
-            className="btn btn-primary btn-sm rounded-3 py-1.5 px-3.5 fw-semibold d-flex align-items-center gap-1.5 flex-shrink-0 border-0"
-            style={{ backgroundColor: '#2563EB', fontSize: '0.8rem' }}
-          >
-            <span>Explore Issues</span>
-            <ArrowRight size={14} />
-          </button>
-        </div>
-
-      </div>
-
-      {/* 6. Selected Issue Detail Modal */}
-      {selectedIssue && (
-        <div 
-          className="position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center z-5 p-3"
-          style={{ backgroundColor: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(3px)' }}
-          onClick={() => setSelectedIssue(null)}
-        >
-          <div 
-            className="card border-0 rounded-4 shadow-lg w-100 overflow-hidden"
-            style={{ maxWidth: '640px', maxHeight: '90vh' }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Modal Header */}
-            <div className="p-3.5 border-bottom d-flex align-items-center justify-content-between bg-light">
-              <div className="d-flex align-items-center gap-2">
-                <span className="badge bg-primary rounded-pill">Open Issue</span>
-                <span className="fw-semibold text-secondary small">{selectedIssue.repo}</span>
-              </div>
-              <button 
-                type="button" 
-                className="btn-close" 
-                onClick={() => setSelectedIssue(null)} 
-                aria-label="Close" 
-              />
-            </div>
-
-            {/* Modal Body */}
-            <div className="p-4 overflow-y-auto" style={{ maxHeight: 'calc(90vh - 140px)' }}>
-              <h3 className="fw-bold text-dark fs-5 mb-2">{selectedIssue.title}</h3>
-              
-              <div className="d-flex flex-wrap gap-2 mb-3">
-                <span className="badge rounded-pill bg-success-subtle text-success border border-success-subtle px-2.5 py-1">
-                  {selectedIssue.matchScore}% Skill Match
-                </span>
-                <span className="badge rounded-pill bg-light text-dark border px-2.5 py-1">
-                  Difficulty: {selectedIssue.difficulty}
-                </span>
-                <span className="badge rounded-pill bg-light text-secondary border px-2.5 py-1">
-                  Updated: {selectedIssue.updated}
-                </span>
-              </div>
-
-              <div className="p-3 rounded-3 mb-3 bg-light border">
-                <div className="fw-semibold text-dark small mb-1">Description:</div>
-                <p className="text-secondary small mb-0">{selectedIssue.description}</p>
-              </div>
-
-              <div className="mb-3">
-                <div className="fw-semibold text-dark small mb-1.5">Recommended Skills:</div>
-                <div className="d-flex flex-wrap gap-1.5">
-                  {selectedIssue.prerequisites.map((p: string, idx: number) => (
-                    <span key={idx} className="badge bg-primary-subtle text-primary border border-primary-subtle">
-                      {p}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              <div className="p-3 rounded-3 mb-3 border bg-dark text-white font-monospace small">
-                <div className="text-secondary mb-1" style={{ fontSize: '0.7rem' }}>Suggested file to modify:</div>
-                <div className="text-warning">{selectedIssue.fileToEdit}</div>
-              </div>
-
-              <div className="d-flex align-items-center justify-content-between pt-2">
+              <div>
                 <button
                   type="button"
-                  onClick={(e) => toggleSaveIssue(selectedIssue.id, e)}
-                  className={`btn btn-sm d-flex align-items-center gap-1.5 ${
-                    savedIssueIds.includes(selectedIssue.id) ? 'btn-outline-danger' : 'btn-outline-secondary'
-                  }`}
+                  onClick={() => triggerAnalysis(undefined, false)}
+                  disabled={isAnalyzing || !usernameInput.trim()}
+                  className="btn btn-primary w-100 rounded-3 py-3 fw-semibold text-white d-flex align-items-center justify-content-center gap-2 shadow-xs"
+                  style={{ backgroundColor: '#2563EB', border: 'none', fontSize: '0.95rem' }}
                 >
-                  <Bookmark size={14} />
-                  <span>{savedIssueIds.includes(selectedIssue.id) ? 'Saved' : 'Save for Later'}</span>
+                  {isAnalyzing ? (
+                    <>
+                      <Loader2 size={20} className="spin" />
+                      Analyzing Public Repositories...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles size={20} />
+                      Analyze GitHub Profile
+                    </>
+                  )}
                 </button>
-
-                <a 
-                  href={selectedIssue.repoUrl} 
-                  target="_blank" 
-                  rel="noreferrer"
-                  className="btn btn-primary btn-sm d-flex align-items-center gap-1.5"
-                >
-                  <span>Open on GitHub</span>
-                  <ExternalLink size={14} />
-                </a>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* 7. Selected Roadmap Step Modal */}
-      {selectedStep !== null && (
-        <div 
-          className="position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center z-5 p-3"
-          style={{ backgroundColor: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(3px)' }}
-          onClick={() => setSelectedStep(null)}
-        >
-          {(() => {
-            const stepObj = roadmapSteps.find(s => s.step === selectedStep);
-            if (!stepObj) return null;
-            return (
-              <div 
-                className="card border-0 rounded-4 shadow-lg w-100 overflow-hidden"
-                style={{ maxWidth: '580px' }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="p-3.5 border-bottom d-flex align-items-center justify-content-between bg-light">
-                  <div className="d-flex align-items-center gap-2">
-                    <span 
-                      className="rounded-2 d-flex align-items-center justify-content-center text-white"
-                      style={{ width: '28px', height: '28px', backgroundColor: stepObj.color }}
-                    >
-                      {stepObj.icon}
+      {/* ========================================================================= */}
+      {/* 2. PROFILE INTELLIGENCE DASHBOARD TAB                                      */}
+      {/* ========================================================================= */}
+      {mainTab === 'dashboard' && analysis && (
+        <div className="d-flex flex-column gap-4">
+          {/* Top Profile Header Card */}
+          <div className="card rounded-4 border shadow-sm p-4 bg-white">
+            <div className="d-flex flex-column flex-md-row align-items-start align-items-md-center justify-content-between gap-4">
+              <div className="d-flex align-items-center gap-3">
+                <img
+                  src={analysis.profile.avatar_url}
+                  alt={analysis.profile.login}
+                  className="rounded-circle border"
+                  style={{ width: '76px', height: '76px' }}
+                />
+                <div>
+                  <div className="d-flex align-items-center gap-2 flex-wrap">
+                    <h2 className="fw-bold mb-0 text-dark" style={{ fontSize: '1.4rem' }}>
+                      {analysis.profile.name || analysis.profile.login}
+                    </h2>
+                    <span className="badge bg-primary-subtle text-primary-emphasis rounded-pill px-2.5 py-1">
+                      @{analysis.profile.login}
                     </span>
-                    <span className="fw-bold text-dark">Step {stepObj.step}: {stepObj.title}</span>
                   </div>
-                  <button type="button" className="btn-close" onClick={() => setSelectedStep(null)} aria-label="Close" />
+                  {analysis.profile.bio && (
+                    <p className="text-secondary mb-1 mt-1 small" style={{ maxWidth: '600px' }}>
+                      {analysis.profile.bio}
+                    </p>
+                  )}
+                  <div className="d-flex align-items-center gap-3 text-muted small mt-1 flex-wrap">
+                    {analysis.profile.company && (
+                      <span className="d-flex align-items-center gap-1">
+                        <Building2 size={13} /> {analysis.profile.company}
+                      </span>
+                    )}
+                    {analysis.profile.location && (
+                      <span className="d-flex align-items-center gap-1">
+                        <MapPin size={13} /> {analysis.profile.location}
+                      </span>
+                    )}
+                    <span className="d-flex align-items-center gap-1">
+                      <Clock size={13} /> Account age: {analysis.stats.accountAgeYears} years
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="d-flex align-items-center gap-4 flex-wrap">
+                <div className="text-center">
+                  <div className="fw-bold text-dark fs-5">{analysis.profile.public_repos}</div>
+                  <div className="text-muted small">Repositories</div>
+                </div>
+                <div className="text-center">
+                  <div className="fw-bold text-dark fs-5">{formatNumber(analysis.stats.totalStars)}</div>
+                  <div className="text-muted small">Stars Earned</div>
+                </div>
+                <div className="text-center">
+                  <div className="fw-bold text-dark fs-5">{formatNumber(analysis.profile.followers)}</div>
+                  <div className="text-muted small">Followers</div>
+                </div>
+                <a
+                  href={analysis.profile.html_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn btn-outline-secondary rounded-3 px-3 py-2 d-flex align-items-center gap-2 small"
+                >
+                  <ExternalLink size={14} /> Open GitHub
+                </a>
+              </div>
+            </div>
+          </div>
+
+          {/* High Impact CTA: Start Technical Assessment */}
+          <div
+            className="card rounded-4 p-4 text-white border-0 shadow-sm"
+            style={{
+              background: 'linear-gradient(135deg, #1E3A8A 0%, #2563EB 50%, #7C3AED 100%)',
+            }}
+          >
+            <div className="d-flex flex-column flex-md-row align-items-start align-items-md-center justify-content-between gap-3">
+              <div>
+                <span className="badge rounded-pill bg-white text-primary px-3 py-1 fw-bold small mb-2">
+                  Next Step in Career Pipeline
+                </span>
+                <h3 className="fw-bold mb-1" style={{ fontSize: '1.4rem' }}>
+                  Ready to Test Your Engineering Skills?
+                </h3>
+                <p className="mb-0 text-blue-100" style={{ fontSize: '0.9rem', color: '#E0E7FF' }}>
+                  We detected your core stack ({analysis.skills.languages.slice(0, 3).join(', ')}). Take our personalized 10-question assessment to pinpoint weaknesses and get tailored open-source contributions.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleStartAssessment}
+                disabled={isStartingAssessment}
+                className="btn btn-light rounded-3 px-4 py-3 fw-bold text-primary d-flex align-items-center gap-2 shadow flex-shrink-0"
+                style={{ fontSize: '0.95rem' }}
+              >
+                {isStartingAssessment ? (
+                  <>
+                    <Loader2 size={18} className="spin text-primary" />
+                    Generating Assessment...
+                  </>
+                ) : (
+                  <>
+                    <Code2 size={18} />
+                    Start My 10-Question Technical Assessment
+                    <ArrowRight size={18} />
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Languages & Skills Breakdown */}
+          <div className="row g-4">
+            {/* Language Breakdown */}
+            <div className="col-12 col-lg-5">
+              <div className="card rounded-4 border shadow-sm p-4 bg-white h-100">
+                <h4 className="fw-bold text-dark mb-3 d-flex align-items-center gap-2" style={{ fontSize: '1.1rem' }}>
+                  <BarChart3 size={18} className="text-primary" />
+                  Language Distribution
+                </h4>
+
+                {/* Progress bar */}
+                <div className="d-flex rounded-pill overflow-hidden mb-3" style={{ height: '10px' }}>
+                  {analysis.languageStats.languages.slice(0, 6).map((lang, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        width: `${Math.max(lang.percentage, 2)}%`,
+                        backgroundColor: lang.color,
+                      }}
+                      title={`${lang.name}: ${lang.percentage}%`}
+                    />
+                  ))}
                 </div>
 
-                <div className="p-4">
-                  <p className="text-secondary small mb-3">{stepObj.desc}</p>
-                  
-                  <h4 className="fw-bold text-dark small mb-2">Best Practices & Checkpoints:</h4>
-                  <ul className="list-unstyled d-flex flex-column gap-2 mb-3">
-                    {stepObj.details.map((det, i) => (
-                      <li key={i} className="d-flex align-items-start gap-2 small text-dark">
-                        <Check size={14} className="text-success flex-shrink-0 mt-1" />
-                        <span>{det}</span>
-                      </li>
-                    ))}
-                  </ul>
+                {/* Language list */}
+                <div className="d-flex flex-column gap-2">
+                  {analysis.languageStats.languages.slice(0, 6).map((lang, idx) => (
+                    <div key={idx} className="d-flex align-items-center justify-content-between small">
+                      <div className="d-flex align-items-center gap-2">
+                        <span className="rounded-circle" style={{ width: '10px', height: '10px', backgroundColor: lang.color }} />
+                        <span className="fw-medium text-dark">{lang.name}</span>
+                      </div>
+                      <span className="text-secondary fw-semibold">{lang.percentage}%</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
 
-                  <div className="p-3 rounded-3 bg-dark text-white font-monospace small mb-3">
-                    <div className="text-secondary mb-1" style={{ fontSize: '0.7rem' }}>Terminal Command:</div>
-                    <div className="text-success">{stepObj.cmd}</div>
+            {/* Extracted Skills Categorized */}
+            <div className="col-12 col-lg-7">
+              <div className="card rounded-4 border shadow-sm p-4 bg-white h-100">
+                <h4 className="fw-bold text-dark mb-3 d-flex align-items-center gap-2" style={{ fontSize: '1.1rem' }}>
+                  <Terminal size={18} className="text-primary" />
+                  Technical Stack Inferred from Repositories
+                </h4>
+
+                <div className="d-flex flex-column gap-3">
+                  <div>
+                    <div className="text-muted small fw-semibold mb-1.5">Languages Detected</div>
+                    <div className="d-flex flex-wrap gap-1.5">
+                      {analysis.skills.languages.map((l, i) => (
+                        <span key={i} className="badge bg-primary-subtle text-primary-emphasis rounded-pill px-3 py-1.5">
+                          {l}
+                        </span>
+                      ))}
+                    </div>
                   </div>
 
-                  <div className="d-flex justify-content-end gap-2">
-                    {selectedStep > 1 && (
-                      <button 
-                        type="button"
-                        onClick={() => setSelectedStep(selectedStep - 1)}
-                        className="btn btn-outline-secondary btn-sm"
+                  {analysis.skills.frameworks.length > 0 && (
+                    <div>
+                      <div className="text-muted small fw-semibold mb-1.5">Frameworks & Libraries</div>
+                      <div className="d-flex flex-wrap gap-1.5">
+                        {analysis.skills.frameworks.map((f, i) => (
+                          <span key={i} className="badge bg-indigo-subtle text-indigo-emphasis rounded-pill px-3 py-1.5" style={{ backgroundColor: '#EEF2FF', color: '#4F46E5' }}>
+                            {f}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {analysis.skills.tools.length > 0 && (
+                    <div>
+                      <div className="text-muted small fw-semibold mb-1.5">Tools & Infrastructure</div>
+                      <div className="d-flex flex-wrap gap-1.5">
+                        {analysis.skills.tools.map((t, i) => (
+                          <span key={i} className="badge bg-secondary-subtle text-secondary-emphasis rounded-pill px-3 py-1.5">
+                            {t}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {analysis.skills.databases.length > 0 && (
+                    <div>
+                      <div className="text-muted small fw-semibold mb-1.5">Databases & Storage</div>
+                      <div className="d-flex flex-wrap gap-1.5">
+                        {analysis.skills.databases.map((d, i) => (
+                          <span key={i} className="badge bg-success-subtle text-success-emphasis rounded-pill px-3 py-1.5">
+                            {d}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Top Repositories Grid */}
+          <div>
+            <h4 className="fw-bold text-dark mb-3 d-flex align-items-center gap-2" style={{ fontSize: '1.2rem' }}>
+              <Layers size={20} className="text-primary" />
+              Top Analyzed Repositories
+            </h4>
+
+            <div className="row g-3">
+              {analysis.topRepos.map(repo => (
+                <div key={repo.id} className="col-12 col-md-6 col-xl-4">
+                  <div className="card rounded-4 border shadow-xs p-3 bg-white h-100 d-flex flex-column justify-content-between">
+                    <div>
+                      <div className="d-flex align-items-center justify-content-between mb-1.5">
+                        <a
+                          href={repo.html_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="fw-bold text-dark text-decoration-none text-truncate"
+                          style={{ fontSize: '0.95rem' }}
+                        >
+                          {repo.name}
+                        </a>
+                        <ExternalLink size={13} className="text-muted flex-shrink-0" />
+                      </div>
+                      <p className="text-secondary small mb-3" style={{ minHeight: '38px', lineHeight: '1.4' }}>
+                        {repo.description || 'No description provided.'}
+                      </p>
+                    </div>
+
+                    <div className="d-flex align-items-center justify-content-between pt-2 border-top small text-muted">
+                      <span className="fw-medium text-dark">{repo.language || 'Code'}</span>
+                      <div className="d-flex align-items-center gap-3">
+                        <span className="d-flex align-items-center gap-1">
+                          <Star size={13} className="text-warning" /> {repo.stargazers_count}
+                        </span>
+                        <span className="d-flex align-items-center gap-1">
+                          <GitFork size={13} /> {repo.forks_count}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 3. 10-QUESTION PERSONALIZED TECHNICAL ASSESSMENT TAB                       */}
+      {/* ========================================================================= */}
+      {mainTab === 'assessment' && assessmentQuestions.length > 0 && (
+        <div className="mx-auto" style={{ maxWidth: '850px' }}>
+          {/* Assessment Header & Progress Bar */}
+          <div className="card rounded-4 border shadow-sm p-4 bg-white mb-4">
+            <div className="d-flex align-items-center justify-content-between mb-2">
+              <div className="d-flex align-items-center gap-2">
+                <span className="badge bg-primary text-white rounded-pill px-3 py-1 fw-bold">
+                  Question {currentQuestionIndex + 1} of 10
+                </span>
+                <span className="badge bg-secondary-subtle text-secondary-emphasis rounded-pill px-2.5 py-1">
+                  {assessmentQuestions[currentQuestionIndex].category}
+                </span>
+                <span className="badge bg-light text-dark border rounded-pill px-2.5 py-1 text-capitalize">
+                  {assessmentQuestions[currentQuestionIndex].difficulty}
+                </span>
+              </div>
+              <div className="text-muted small fw-medium">
+                {answeredCount} of 10 Answered
+              </div>
+            </div>
+
+            {/* Visual Progress Bar */}
+            <div className="w-100 bg-light rounded-pill overflow-hidden mb-3" style={{ height: '8px' }}>
+              <div
+                className="bg-primary rounded-pill transition-all"
+                style={{
+                  width: `${((currentQuestionIndex + 1) / 10) * 100}%`,
+                  height: '100%',
+                }}
+              />
+            </div>
+
+            {/* Quick Question Bubble Jump Bar */}
+            <div className="d-flex align-items-center justify-content-center gap-1.5 flex-wrap">
+              {assessmentQuestions.map((q, idx) => {
+                const isCurrent = idx === currentQuestionIndex;
+                const isAnswered = selectedAnswers[q.id] !== undefined;
+
+                return (
+                  <button
+                    key={q.id}
+                    type="button"
+                    onClick={() => setCurrentQuestionIndex(idx)}
+                    className="btn p-0 rounded-circle fw-bold d-flex align-items-center justify-content-center"
+                    style={{
+                      width: '32px',
+                      height: '32px',
+                      fontSize: '0.8rem',
+                      backgroundColor: isCurrent ? '#2563EB' : isAnswered ? '#DCFCE7' : '#F1F5F9',
+                      color: isCurrent ? '#FFFFFF' : isAnswered ? '#15803D' : '#64748B',
+                      border: isCurrent ? '2px solid #1D4ED8' : isAnswered ? '1px solid #86EFAC' : '1px solid #E2E8F0',
+                    }}
+                  >
+                    {idx + 1}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Active Question Card */}
+          {(() => {
+            const activeQ = assessmentQuestions[currentQuestionIndex];
+            const currentSelected = selectedAnswers[activeQ.id];
+
+            return (
+              <div className="card rounded-4 border shadow-sm p-4 p-md-5 bg-white mb-4">
+                <div className="d-flex align-items-center gap-2 text-primary small fw-semibold mb-2">
+                  <Sparkles size={16} /> Focus Topic: {activeQ.topic}
+                </div>
+
+                <h3 className="fw-bold text-dark mb-3" style={{ fontSize: '1.25rem', lineHeight: '1.5' }}>
+                  {activeQ.question}
+                </h3>
+
+                {/* Optional Code Snippet */}
+                {activeQ.codeSnippet && (
+                  <div
+                    className="p-3 rounded-3 mb-4 font-monospace text-white overflow-x-auto"
+                    style={{ backgroundColor: '#0F172A', fontSize: '0.85rem', lineHeight: '1.5' }}
+                  >
+                    <pre className="mb-0" style={{ margin: 0 }}>
+                      <code>{activeQ.codeSnippet}</code>
+                    </pre>
+                  </div>
+                )}
+
+                {/* 4 Multiple-Choice Options */}
+                <div className="d-flex flex-column gap-2.5 mb-4">
+                  {activeQ.options.map((option, optIdx) => {
+                    const isSelected = currentSelected === optIdx;
+
+                    return (
+                      <div
+                        key={optIdx}
+                        onClick={() => handleSelectAnswer(activeQ.id, optIdx)}
+                        className={`p-3.5 rounded-3 border d-flex align-items-start gap-3 cursor-pointer transition-all ${
+                          isSelected ? 'border-primary bg-primary-subtle text-primary-emphasis shadow-xs' : 'bg-white hover-bg-light'
+                        }`}
+                        style={{ cursor: 'pointer', borderWidth: isSelected ? '2px' : '1px' }}
                       >
-                        Previous Step
-                      </button>
-                    )}
-                    {selectedStep < roadmapSteps.length ? (
-                      <button 
+                        <div
+                          className={`rounded-circle d-flex align-items-center justify-content-center flex-shrink-0 fw-bold`}
+                          style={{
+                            width: '26px',
+                            height: '26px',
+                            fontSize: '0.8rem',
+                            backgroundColor: isSelected ? '#2563EB' : '#F1F5F9',
+                            color: isSelected ? '#FFFFFF' : '#64748B',
+                          }}
+                        >
+                          {String.fromCharCode(65 + optIdx)}
+                        </div>
+                        <div className="flex-grow-1" style={{ fontSize: '0.92rem', paddingTop: '2px', lineHeight: '1.5' }}>
+                          {option}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Question Navigation Controls */}
+                <div className="d-flex align-items-center justify-content-between pt-3 border-top">
+                  <button
+                    type="button"
+                    onClick={() => setCurrentQuestionIndex(prev => Math.max(prev - 1, 0))}
+                    disabled={currentQuestionIndex === 0}
+                    className="btn btn-outline-secondary rounded-3 px-3 py-2 d-flex align-items-center gap-1.5"
+                    style={{ fontSize: '0.88rem' }}
+                  >
+                    <ChevronLeft size={16} /> Previous
+                  </button>
+
+                  <div className="d-flex align-items-center gap-2">
+                    {currentQuestionIndex < 9 ? (
+                      <button
                         type="button"
-                        onClick={() => setSelectedStep(selectedStep + 1)}
-                        className="btn btn-primary btn-sm"
+                        onClick={() => setCurrentQuestionIndex(prev => Math.min(prev + 1, 9))}
+                        className="btn btn-primary rounded-3 px-4 py-2 d-flex align-items-center gap-1.5 fw-semibold"
+                        style={{ fontSize: '0.88rem', backgroundColor: '#2563EB' }}
                       >
-                        Next Step
+                        Next Question <ChevronRight size={16} />
                       </button>
                     ) : (
-                      <button 
+                      <button
                         type="button"
-                        onClick={() => setSelectedStep(null)}
-                        className="btn btn-success btn-sm"
+                        onClick={() => setShowSubmitConfirmModal(true)}
+                        className="btn btn-success rounded-3 px-4 py-2 d-flex align-items-center gap-1.5 fw-semibold text-white shadow-xs"
+                        style={{ fontSize: '0.88rem', backgroundColor: '#059669' }}
                       >
-                        Done
+                        Review & Submit Assessment
                       </button>
                     )}
                   </div>
@@ -1544,6 +1365,552 @@ export const GitHubOpenSourceView: React.FC<GitHubOpenSourceViewProps> = ({
         </div>
       )}
 
+      {/* ========================================================================= */}
+      {/* 4. WEAKNESS ANALYSIS & ASSESSMENT RESULTS TAB                              */}
+      {/* ========================================================================= */}
+      {mainTab === 'results' && assessmentResult && (
+        <div className="d-flex flex-column gap-4">
+          {/* Scorecard Hero */}
+          <div
+            className="card rounded-4 p-4 p-md-5 text-white border-0 shadow-sm"
+            style={{
+              background:
+                assessmentResult.percentage >= 70
+                  ? 'linear-gradient(135deg, #065F46 0%, #059669 50%, #10B981 100%)'
+                  : 'linear-gradient(135deg, #1E293B 0%, #334155 50%, #475569 100%)',
+            }}
+          >
+            <div className="d-flex flex-column flex-md-row align-items-start align-items-md-center justify-content-between gap-4">
+              <div>
+                <span className="badge rounded-pill bg-white text-dark px-3 py-1 fw-bold small mb-2">
+                  Evaluation Complete · Verified from Answers
+                </span>
+                <h2 className="fw-bold mb-1" style={{ fontSize: '1.6rem' }}>
+                  Technical Score: {assessmentResult.score} / {assessmentResult.totalQuestions} ({assessmentResult.percentage}%)
+                </h2>
+                <p className="mb-0 text-white-50" style={{ fontSize: '0.92rem' }}>
+                  Performance Tier: <strong className="text-white">{assessmentResult.performanceRating}</strong>. {assessmentResult.evaluationSummary}
+                </p>
+              </div>
+
+              <div className="d-flex align-items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMainTab('issues');
+                    if (issues.length === 0) fetchWeaknessIssues();
+                  }}
+                  className="btn btn-light rounded-3 px-4 py-3 fw-bold text-dark d-flex align-items-center gap-2 shadow"
+                  style={{ fontSize: '0.92rem' }}
+                >
+                  <GitPullRequest size={18} />
+                  Explore Targeted Open-Source Issues
+                  <ArrowRight size={18} />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Weaknesses vs Strengths Grid */}
+          <div className="row g-4">
+            {/* Weaknesses / Skill Gaps */}
+            <div className="col-12 col-lg-7">
+              <div className="card rounded-4 border shadow-sm p-4 bg-white h-100">
+                <div className="d-flex align-items-center justify-content-between mb-3">
+                  <h4 className="fw-bold text-dark mb-0 d-flex align-items-center gap-2" style={{ fontSize: '1.15rem' }}>
+                    <AlertTriangle size={18} className="text-danger" />
+                    Identified Weaknesses & Skill Gaps ({assessmentResult.weaknesses.length})
+                  </h4>
+                  <span className="badge bg-danger-subtle text-danger-emphasis rounded-pill px-2.5 py-1">
+                    Needs Practice
+                  </span>
+                </div>
+
+                <div className="d-flex flex-column gap-3">
+                  {assessmentResult.weaknesses.map((w, idx) => (
+                    <div key={idx} className="p-3.5 rounded-3 border bg-light">
+                      <div className="d-flex align-items-center justify-content-between mb-1.5">
+                        <div className="fw-bold text-dark" style={{ fontSize: '0.95rem' }}>
+                          {w.topic}
+                        </div>
+                        <span
+                          className={`badge rounded-pill px-2.5 py-1 ${
+                            w.learningPriority === 'High'
+                              ? 'bg-danger-subtle text-danger-emphasis'
+                              : 'bg-warning-subtle text-warning-emphasis'
+                          }`}
+                          style={{ fontSize: '0.72rem' }}
+                        >
+                          {w.learningPriority} Priority
+                        </span>
+                      </div>
+
+                      <div className="small text-danger mb-2 font-monospace" style={{ fontSize: '0.8rem' }}>
+                        {w.evidence}
+                      </div>
+
+                      <p className="text-secondary small mb-2" style={{ lineHeight: '1.4' }}>
+                        {w.whyItMatters}
+                      </p>
+
+                      <div className="d-flex align-items-center justify-content-between pt-2 border-top">
+                        <span className="badge bg-secondary-subtle text-secondary-emphasis rounded-pill px-2">
+                          Skill: {w.relatedSkill}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setWeaknessFilter(w.topic);
+                            setMainTab('issues');
+                            fetchWeaknessIssues(assessmentResult.weaknesses, w.topic);
+                          }}
+                          className="btn btn-sm btn-outline-primary rounded-pill d-flex align-items-center gap-1"
+                          style={{ fontSize: '0.78rem' }}
+                        >
+                          Find Issues for this Topic <ArrowRight size={13} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Strengths & Category Breakdown */}
+            <div className="col-12 col-lg-5">
+              <div className="card rounded-4 border shadow-sm p-4 bg-white h-100">
+                <div className="d-flex align-items-center justify-content-between mb-3">
+                  <h4 className="fw-bold text-dark mb-0 d-flex align-items-center gap-2" style={{ fontSize: '1.15rem' }}>
+                    <CheckCircle2 size={18} className="text-success" />
+                    Verified Strengths ({assessmentResult.strengths.length})
+                  </h4>
+                  <span className="badge bg-success-subtle text-success-emphasis rounded-pill px-2.5 py-1">
+                    Mastered
+                  </span>
+                </div>
+
+                <div className="d-flex flex-column gap-2 mb-4">
+                  {assessmentResult.strengths.length > 0 ? (
+                    assessmentResult.strengths.map((s, idx) => (
+                      <div key={idx} className="p-2.5 rounded-3 border bg-light d-flex align-items-center gap-2">
+                        <Check size={16} className="text-success flex-shrink-0" />
+                        <div className="flex-grow-1">
+                          <div className="fw-semibold text-dark small">{s.topic}</div>
+                          <div className="text-muted" style={{ fontSize: '0.75rem' }}>
+                            {s.relatedSkill} · Verified by assessment
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-muted small">No verified strengths yet. Review the question breakdown below.</div>
+                  )}
+                </div>
+
+                <h5 className="fw-bold text-dark mb-2" style={{ fontSize: '0.95rem' }}>
+                  Topic Performance
+                </h5>
+                <div className="d-flex flex-column gap-2">
+                  {assessmentResult.topicBreakdown.map((tb, idx) => (
+                    <div key={idx}>
+                      <div className="d-flex align-items-center justify-content-between small mb-1">
+                        <span className="text-dark fw-medium">{tb.topic}</span>
+                        <span className="fw-bold">{tb.percentage}% ({tb.correct}/{tb.total})</span>
+                      </div>
+                      <div className="bg-light rounded-pill overflow-hidden" style={{ height: '6px' }}>
+                        <div
+                          className={`rounded-pill ${tb.percentage >= 70 ? 'bg-success' : 'bg-danger'}`}
+                          style={{ width: `${tb.percentage}%`, height: '100%' }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Complete 10-Question Review */}
+          <div className="card rounded-4 border shadow-sm p-4 bg-white">
+            <h4 className="fw-bold text-dark mb-3" style={{ fontSize: '1.15rem' }}>
+              Full 10-Question Review & Explanations
+            </h4>
+
+            <div className="d-flex flex-column gap-3">
+              {assessmentResult.questionResults.map((qr, idx) => (
+                <div
+                  key={idx}
+                  className={`p-3.5 rounded-4 border ${
+                    qr.isCorrect ? 'border-success-subtle bg-light' : 'border-danger-subtle bg-light'
+                  }`}
+                >
+                  <div className="d-flex align-items-center justify-content-between mb-2">
+                    <div className="d-flex align-items-center gap-2">
+                      <span className="fw-bold text-dark small">Q{qr.questionId}. {qr.topic}</span>
+                      <span className="badge bg-secondary-subtle text-secondary-emphasis rounded-pill" style={{ fontSize: '0.7rem' }}>
+                        {qr.category}
+                      </span>
+                    </div>
+                    {qr.isCorrect ? (
+                      <span className="badge bg-success text-white rounded-pill px-2.5 py-1 small d-flex align-items-center gap-1">
+                        <Check size={12} /> Correct
+                      </span>
+                    ) : (
+                      <span className="badge bg-danger text-white rounded-pill px-2.5 py-1 small d-flex align-items-center gap-1">
+                        <XCircle size={12} /> Incorrect
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="fw-medium text-dark mb-2 small" style={{ lineHeight: '1.5' }}>
+                    {qr.question}
+                  </p>
+
+                  <div className="p-3 rounded-3 bg-white border mb-2 small">
+                    <div className="text-secondary mb-1">
+                      Your answer:{' '}
+                      <strong className={qr.isCorrect ? 'text-success' : 'text-danger'}>
+                        {qr.userAnswerIndex >= 0 ? qr.options[qr.userAnswerIndex] : 'Unanswered'}
+                      </strong>
+                    </div>
+                    {!qr.isCorrect && (
+                      <div className="text-success fw-semibold">
+                        Correct answer: {qr.options[qr.correctAnswerIndex]}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="small text-muted p-2 rounded-2" style={{ backgroundColor: 'rgba(0,0,0,0.03)' }}>
+                    <strong className="text-dark">Explanation:</strong> {qr.explanation}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 5. OPEN SOURCE RECOMMENDATIONS TAB                                         */}
+      {/* ========================================================================= */}
+      {mainTab === 'issues' && (
+        <div className="d-flex flex-column gap-4">
+          {/* Header Banner */}
+          <div className="card rounded-4 border shadow-sm p-4 bg-white">
+            <div className="d-flex flex-column flex-md-row align-items-start align-items-md-center justify-content-between gap-3 mb-3">
+              <div>
+                <h3 className="fw-bold text-dark mb-1" style={{ fontSize: '1.3rem' }}>
+                  Personalized Open-Source Contributions
+                </h3>
+                <p className="text-secondary mb-0 small">
+                  Live open issues from GitHub mapped directly to your verified skill gaps and detected repositories.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => fetchWeaknessIssues()}
+                disabled={isLoadingIssues}
+                className="btn btn-outline-primary rounded-3 px-3 py-2 d-flex align-items-center gap-2 small flex-shrink-0"
+              >
+                <RefreshCw size={14} className={isLoadingIssues ? 'spin' : ''} />
+                Refresh Issues
+              </button>
+            </div>
+
+            {/* Filter Bar */}
+            <div className="d-flex flex-wrap gap-2 align-items-center pt-3 border-top">
+              {/* Weakness filter */}
+              {assessmentResult && assessmentResult.weaknesses.length > 0 && (
+                <div className="d-flex align-items-center gap-1.5 flex-wrap">
+                  <span className="text-muted small fw-semibold me-1">Target:</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setWeaknessFilter('all');
+                      fetchWeaknessIssues(assessmentResult.weaknesses, 'all');
+                    }}
+                    className={`btn btn-sm rounded-pill px-3 ${
+                      weaknessFilter === 'all' ? 'btn-primary' : 'btn-light border text-secondary'
+                    }`}
+                  >
+                    All Weaknesses
+                  </button>
+                  {assessmentResult.weaknesses.map((w, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => {
+                        setWeaknessFilter(w.topic);
+                        fetchWeaknessIssues(assessmentResult.weaknesses, w.topic);
+                      }}
+                      className={`btn btn-sm rounded-pill px-3 ${
+                        weaknessFilter === w.topic ? 'btn-primary' : 'btn-light border text-secondary'
+                      }`}
+                    >
+                      {w.topic}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Difficulty filter */}
+              <div className="ms-md-auto d-flex align-items-center gap-2">
+                <select
+                  value={difficultyFilter}
+                  onChange={e => {
+                    const d = e.target.value as DifficultyFilter;
+                    setDifficultyFilter(d);
+                    fetchWeaknessIssues(undefined, weaknessFilter, d);
+                  }}
+                  className="form-select form-select-sm rounded-3 border"
+                  style={{ width: '160px' }}
+                >
+                  <option value="all">All Difficulties</option>
+                  <option value="beginner">Beginner Friendly</option>
+                  <option value="intermediate">Intermediate</option>
+                  <option value="advanced">Advanced</option>
+                </select>
+
+                <div className="position-relative" style={{ width: '200px' }}>
+                  <input
+                    type="text"
+                    value={issueSearchQuery}
+                    onChange={e => setIssueSearchQuery(e.target.value)}
+                    placeholder="Search issues..."
+                    className="form-control form-control-sm rounded-3 ps-4"
+                  />
+                  <Search size={13} className="position-absolute top-50 translate-middle-y text-muted ps-1" style={{ left: '6px' }} />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Issue Cards Grid */}
+          {isLoadingIssues ? (
+            <div className="row g-3">
+              {[1, 2, 3, 4, 5, 6].map(n => (
+                <div key={n} className="col-12 col-md-6 col-xl-4">
+                  <div className="card rounded-4 border p-4 bg-white">
+                    <Skeleton width="60%" height="20px" className="mb-2" />
+                    <Skeleton width="90%" height="16px" className="mb-3" />
+                    <Skeleton width="40%" height="14px" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : filteredIssues.length > 0 ? (
+            <div className="row g-3">
+              {filteredIssues.map(issue => {
+                const isSaved = savedIssueIds.has(issue.id);
+
+                return (
+                  <div key={issue.id} className="col-12 col-md-6 col-xl-4">
+                    <div className="card rounded-4 border shadow-xs p-4 bg-white h-100 d-flex flex-column justify-content-between">
+                      <div>
+                        {/* Top repo and action */}
+                        <div className="d-flex align-items-center justify-content-between mb-2">
+                          <span className="badge bg-secondary-subtle text-secondary-emphasis rounded-pill px-2.5 py-1 small">
+                            {issue.repo}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => toggleSaveIssue(issue.id)}
+                            className="btn btn-sm btn-link p-0 text-muted"
+                            title={isSaved ? 'Saved' : 'Save for later'}
+                          >
+                            {isSaved ? <BookmarkCheck size={18} className="text-primary" /> : <Bookmark size={18} />}
+                          </button>
+                        </div>
+
+                        {/* Issue Title */}
+                        <h4 className="fw-bold text-dark mb-2" style={{ fontSize: '0.98rem', lineHeight: '1.4' }}>
+                          #{issue.issueNumber} {issue.title}
+                        </h4>
+
+                        {/* Weakness addressed tag */}
+                        {issue.weaknessAddressed && (
+                          <div
+                            className="p-2 rounded-2 mb-2.5 small"
+                            style={{ backgroundColor: '#FEF3C7', color: '#92400E', fontSize: '0.78rem' }}
+                          >
+                            <strong>Targets Skill Gap:</strong> {issue.weaknessAddressed}
+                          </div>
+                        )}
+
+                        <p className="text-secondary small mb-3" style={{ lineHeight: '1.4' }}>
+                          {issue.whyRecommended}
+                        </p>
+
+                        {/* Labels */}
+                        <div className="d-flex flex-wrap gap-1 mb-3">
+                          <span
+                            className="badge rounded-pill px-2 py-1"
+                            style={{ backgroundColor: '#EEF2FF', color: '#4F46E5', fontSize: '0.7rem' }}
+                          >
+                            {issue.difficultyEstimate} (Est.)
+                          </span>
+                          {issue.labels.slice(0, 2).map((l, idx) => (
+                            <span key={idx} className="badge bg-light text-muted border rounded-pill px-2 py-1" style={{ fontSize: '0.7rem' }}>
+                              {l}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Card Footer: GitHub Link */}
+                      <div className="pt-3 border-top d-flex align-items-center justify-content-between">
+                        <span className="text-muted small">Updated {timeAgo(issue.updated_at)}</span>
+                        <a
+                          href={issue.html_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="btn btn-sm btn-primary rounded-pill px-3 py-1.5 fw-semibold d-flex align-items-center gap-1.5"
+                          style={{ fontSize: '0.8rem', backgroundColor: '#2563EB' }}
+                        >
+                          Contribute on GitHub <ExternalLink size={13} />
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="card rounded-4 border p-5 text-center bg-white">
+              <GitPullRequest size={36} className="text-muted mx-auto mb-2" />
+              <h5 className="fw-bold text-dark mb-1">No Matching Issues Found</h5>
+              <p className="text-secondary small mb-3">
+                Try clearing search terms or selecting a different weakness filter.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setWeaknessFilter('all');
+                  setDifficultyFilter('all');
+                  setIssueSearchQuery('');
+                  fetchWeaknessIssues();
+                }}
+                className="btn btn-outline-primary rounded-3 px-3 py-2 small mx-auto"
+              >
+                Reset Filters
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: Submit Assessment Confirmation                                      */}
+      {/* ========================================================================= */}
+      {showSubmitConfirmModal && (
+        <div
+          className="modal-backdrop-custom d-flex align-items-center justify-content-center p-3"
+          style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(4px)', zIndex: 1060 }}
+        >
+          <div className="bg-white rounded-4 shadow-lg p-4" style={{ maxWidth: '440px', width: '100%', border: '1px solid #E2E8F0' }}>
+            <div className="d-flex align-items-center gap-2 mb-2 text-dark">
+              <Award size={22} className="text-primary" />
+              <h4 className="fw-bold mb-0" style={{ fontSize: '1.15rem' }}>Submit Assessment?</h4>
+            </div>
+
+            <p className="text-secondary small mb-3" style={{ lineHeight: '1.5' }}>
+              You have answered <strong>{answeredCount} of 10</strong> questions.
+              {answeredCount < 10 && (
+                <span className="d-block text-danger fw-semibold mt-1">
+                  Note: You have {10 - answeredCount} unanswered questions that will be marked incorrect.
+                </span>
+              )}
+            </p>
+
+            <div className="d-flex justify-content-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowSubmitConfirmModal(false)}
+                className="btn btn-light rounded-3 px-3 py-2 small fw-medium"
+              >
+                Go Back & Review
+              </button>
+              <button
+                type="button"
+                onClick={handleSubmitAssessment}
+                disabled={isSubmittingAssessment}
+                className="btn btn-primary rounded-3 px-4 py-2 small fw-semibold text-white d-flex align-items-center gap-2"
+                style={{ backgroundColor: '#2563EB' }}
+              >
+                {isSubmittingAssessment ? <Loader2 size={16} className="spin" /> : null}
+                Yes, Submit for Evaluation
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: OAuth Admin Configuration Guidance (No Sandbox!)                   */}
+      {/* ========================================================================= */}
+      {showOAuthHelpModal && (
+        <div
+          className="modal-backdrop-custom d-flex align-items-center justify-content-center p-3"
+          style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(4px)', zIndex: 1060 }}
+        >
+          <div className="bg-white rounded-4 shadow-lg p-4" style={{ maxWidth: '520px', width: '100%', border: '1px solid #E2E8F0' }}>
+            <div className="d-flex align-items-center justify-content-between mb-3">
+              <div className="d-flex align-items-center gap-2">
+                <div className="rounded-3 p-2 bg-dark text-white">
+                  <Github size={20} />
+                </div>
+                <h4 className="fw-bold mb-0 text-dark" style={{ fontSize: '1.15rem' }}>
+                  GitHub OAuth Configuration
+                </h4>
+              </div>
+              <button type="button" className="btn-close" onClick={() => setShowOAuthHelpModal(false)} />
+            </div>
+
+            <p className="text-secondary small mb-3" style={{ lineHeight: '1.5' }}>
+              To allow every new user to authenticate their own GitHub accounts with one click, configure your GitHub OAuth App credentials in your server environment:
+            </p>
+
+            <div className="p-3 rounded-3 mb-3 font-monospace small" style={{ backgroundColor: '#0F172A', color: '#E2E8F0', fontSize: '0.8rem' }}>
+              <div className="text-muted mb-1"># In backend/.env</div>
+              <div className="text-success">GITHUB_CLIENT_ID=your_github_client_id</div>
+              <div className="text-success">GITHUB_CLIENT_SECRET=your_github_client_secret</div>
+              <div className="text-info">GITHUB_CALLBACK_URL={oauthCallbackUrl}</div>
+            </div>
+
+            <div className="p-3 rounded-3 bg-light border mb-4 small text-secondary">
+              <strong>Quick Steps:</strong>
+              <ol className="mb-0 ps-3 mt-1">
+                <li>Create an OAuth App at <code>github.com/settings/developers</code></li>
+                <li>Set Authorization callback URL to: <code>{oauthCallbackUrl}</code></li>
+                <li>Paste Client ID and Client Secret into <code>backend/.env</code></li>
+              </ol>
+            </div>
+
+            <div className="d-flex justify-content-end gap-2">
+              <button
+                type="button"
+                onClick={async () => {
+                  await checkOAuthStatus();
+                  showNotification('info', 'Checked backend configuration status.');
+                  setShowOAuthHelpModal(false);
+                }}
+                className="btn btn-outline-primary rounded-3 px-3 py-2 small fw-semibold"
+              >
+                Re-check Status
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowOAuthHelpModal(false)}
+                className="btn btn-primary rounded-3 px-4 py-2 small fw-semibold text-white"
+                style={{ backgroundColor: '#2563EB' }}
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

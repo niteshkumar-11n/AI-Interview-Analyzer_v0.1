@@ -6,7 +6,6 @@ import { DashboardView } from './pages/dashboard/DashboardView.tsx';
 import { ProfileView } from './pages/profile/ProfileView.tsx';
 import { AuthModal } from './components/auth/AuthModal.tsx';
 import { MockInterviewModal } from './components/common/MockInterviewModal.tsx';
-import { ResumeAnalyzerModal } from './components/resume/ResumeAnalyzerModal.tsx';
 import { CodingInterviewModal } from './components/coding/CodingInterviewModal.tsx';
 import { JobsExplorerModal } from './components/job/JobsExplorerModal.tsx';
 import { ScorecardDetailsModal } from './components/interview/ScorecardDetailsModal.tsx';
@@ -14,12 +13,12 @@ import { PracticeRoadmapModal } from './components/interview/PracticeRoadmapModa
 import { OpenSourceModal } from './components/github/OpenSourceModal.tsx';
 import { SettingsModal } from './components/common/SettingsModal.tsx';
 import { SupportModal } from './components/common/SupportModal.tsx';
-import { ResumeAnalyzerView } from './pages/resume/ResumeAnalyzerView.tsx';
+import { CreditWalletModal } from './components/payment/CreditWalletModal.tsx';
+import { InterviewHistoryModal } from './components/interview/InterviewHistoryModal.tsx';
 import { JobMatchingView } from './pages/jobs/JobMatchingView.tsx';
 import { JobRecommendationsView } from './pages/jobs/JobRecommendationsView.tsx';
 import { AIInterviewView } from './pages/interview/AIInterviewView.tsx';
 import { CodingPracticeView } from './pages/interview/CodingPracticeView.tsx';
-import { CommunicationAnalysisView } from './pages/interview/CommunicationAnalysisView.tsx';
 import { InterviewReadinessView } from './pages/interview/InterviewReadinessView.tsx';
 import { GitHubOpenSourceView } from './pages/github/GitHubOpenSourceView.tsx';
 import { AnalyticsView } from './pages/analytics/AnalyticsView.tsx';
@@ -38,7 +37,6 @@ function AppContent() {
 
   // Global Modals State
   const [isMockModalOpen, setIsMockModalOpen] = useState(false);
-  const [isResumeModalOpen, setIsResumeModalOpen] = useState(false);
   const [isCodingModalOpen, setIsCodingModalOpen] = useState(false);
   const [isJobsModalOpen, setIsJobsModalOpen] = useState(false);
   const [isScorecardModalOpen, setIsScorecardModalOpen] = useState(false);
@@ -46,6 +44,8 @@ function AppContent() {
   const [isOpenSourceModalOpen, setIsOpenSourceModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isSupportModalOpen, setIsSupportModalOpen] = useState(false);
+  const [isCreditModalOpen, setIsCreditModalOpen] = useState(false);
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
 
   // Fallback lists for standalone modal opens
   const [modalJobs, setModalJobs] = useState<RecommendedJob[]>([
@@ -139,10 +139,9 @@ function AppContent() {
   };
 
   const handleOpenModal = (
-    modal: 'resume' | 'coding' | 'jobs' | 'github' | 'history' | 'communication' | 'settings' | 'support'
+    modal: 'coding' | 'jobs' | 'github' | 'history' | 'settings' | 'support'
   ) => {
-    if (modal === 'resume') setIsResumeModalOpen(true);
-    else if (modal === 'coding') setIsCodingModalOpen(true);
+    if (modal === 'coding') setIsCodingModalOpen(true);
     else if (modal === 'jobs') setIsJobsModalOpen(true);
     else if (modal === 'github') setIsOpenSourceModalOpen(true);
     else if (modal === 'history') setIsScorecardModalOpen(true);
@@ -203,6 +202,7 @@ function AppContent() {
                 onOpenMockTest={() => setIsMockModalOpen(true)}
                 onOpenLogin={handleOpenLogin}
                 onOpenRegister={handleOpenRegister}
+                onOpenCreditModal={() => setIsCreditModalOpen(true)}
               />
 
               {/* Dynamic Screen View */}
@@ -220,12 +220,7 @@ function AppContent() {
                 ) : currentView === 'interview-readiness' ? (
                   <InterviewReadinessView
                     onNavigateToCoding={() => handleNavigate('coding-interview', 'coding-interview')}
-                    onNavigateToResume={() => handleNavigate('resume-analyzer', 'resume-analyzer')}
                     onNavigateToAIInterview={() => handleNavigate('ai-interview', 'ai-interview')}
-                  />
-                ) : currentView === 'communication' ? (
-                  <CommunicationAnalysisView
-                    onPracticeAgain={() => handleNavigate('ai-interview', 'ai-interview')}
                   />
                 ) : currentView === 'coding-interview' ? (
                   <CodingPracticeView
@@ -236,27 +231,20 @@ function AppContent() {
                   <AIInterviewView
                     onOpenUpgradeModal={() => setIsSettingsModalOpen(true)}
                     onNavigateToProfile={() => handleNavigate('profile', 'profile')}
+                    onOpenCreditModal={() => setIsCreditModalOpen(true)}
+                    onOpenHistoryModal={() => setIsHistoryModalOpen(true)}
                   />
                 ) : currentView === 'dashboard' ? (
                   <DashboardView
                     onOpenMockTest={() => setIsMockModalOpen(true)}
                     onNavigateToProfile={() => handleNavigate('profile', 'profile')}
-                  />
-                ) : currentView === 'resume-analyzer' ? (
-                  <ResumeAnalyzerView
-                    onOpenMockTest={() => setIsMockModalOpen(true)}
-                    onNavigateToJobs={() => handleNavigate('job-recommendations', 'job-recommendations')}
-                    onOpenCoding={() => setIsCodingModalOpen(true)}
-                    onOpenVoice={() => setIsMockModalOpen(true)}
-                    onOpenGithub={() => setIsOpenSourceModalOpen(true)}
-                    onOpenRoadmap={() => setIsPracticeModalOpen(true)}
-                    onOpenScorecard={() => setIsScorecardModalOpen(true)}
+                    onOpenCreditModal={() => setIsCreditModalOpen(true)}
+                    onNavigateToInterview={() => handleNavigate('ai-interview', 'ai-interview')}
                   />
                 ) : currentView === 'job-matching' ? (
                   <JobMatchingView
                     onOpenRoadmap={() => setIsPracticeModalOpen(true)}
                     onOpenSupport={() => setIsSupportModalOpen(true)}
-                    onNavigateToResume={() => handleNavigate('resume-analyzer', 'resume-analyzer')}
                     onNavigateToJobs={() => handleNavigate('job-recommendations', 'job-recommendations')}
                     onNavigateToInterview={() => handleNavigate('ai-interview', 'ai-interview')}
                     onNavigateToCoding={() => handleNavigate('coding-interview', 'coding-interview')}
@@ -312,10 +300,6 @@ function AppContent() {
         onOpenVoice={() => setIsMockModalOpen(true)}
       />
 
-      <ResumeAnalyzerModal
-        isOpen={isResumeModalOpen}
-        onClose={() => setIsResumeModalOpen(false)}
-      />
 
       <CodingInterviewModal
         isOpen={isCodingModalOpen}
@@ -358,6 +342,18 @@ function AppContent() {
       <SupportModal
         isOpen={isSupportModalOpen}
         onClose={() => setIsSupportModalOpen(false)}
+      />
+
+      {/* Credit Wallet & Payment Modal */}
+      <CreditWalletModal
+        isOpen={isCreditModalOpen}
+        onClose={() => setIsCreditModalOpen(false)}
+      />
+
+      {/* Past Technical Interviews & Report Inspector Modal */}
+      <InterviewHistoryModal
+        isOpen={isHistoryModalOpen}
+        onClose={() => setIsHistoryModalOpen(false)}
       />
     </div>
   );

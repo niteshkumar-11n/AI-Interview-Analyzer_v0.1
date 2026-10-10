@@ -17,17 +17,20 @@ import {
   Target,
   PenTool
 } from 'lucide-react';
-import { ResumeAnalyzerModal } from '../../components/resume/ResumeAnalyzerModal.tsx';
+
 import { CodingInterviewModal } from '../../components/coding/CodingInterviewModal.tsx';
 import { JobsExplorerModal } from '../../components/job/JobsExplorerModal.tsx';
 
 import { ScorecardDetailsModal } from '../../components/interview/ScorecardDetailsModal.tsx';
 import { PracticeRoadmapModal } from '../../components/interview/PracticeRoadmapModal.tsx';
 import { OpenSourceModal } from '../../components/github/OpenSourceModal.tsx';
+import { Coins } from 'lucide-react';
 
 interface DashboardViewProps {
   onOpenMockTest: () => void;
   onNavigateToProfile: () => void;
+  onOpenCreditModal?: () => void;
+  onNavigateToInterview?: () => void;
 }
 
 // Crisp Vector Logos for Companies and Repositories
@@ -103,7 +106,9 @@ const GitHubIcon = () => (
 
 export const DashboardView: React.FC<DashboardViewProps> = ({ 
   onOpenMockTest, 
-  onNavigateToProfile 
+  onNavigateToProfile,
+  onOpenCreditModal,
+  onNavigateToInterview
 }) => {
   const { user } = useAuth();
   const [data, setData] = useState<DashboardData | null>(null);
@@ -111,7 +116,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [error, setError] = useState<string | null>(null);
 
   // Modals state
-  const [isResumeModalOpen, setIsResumeModalOpen] = useState(false);
+
   const [isCodingModalOpen, setIsCodingModalOpen] = useState(false);
   const [isJobsModalOpen, setIsJobsModalOpen] = useState(false);
   const [isScorecardModalOpen, setIsScorecardModalOpen] = useState(false);
@@ -263,6 +268,64 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </div>
 
+      {/* CREDIT WALLET & QUICK REFILL BANNER */}
+      <div 
+        className="card border-0 rounded-3 p-3 px-md-4 mb-4 shadow-xs d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3"
+        style={{
+          background: 'linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%)',
+          borderLeft: '4px solid #F59E0B'
+        }}
+      >
+        <div className="d-flex align-items-center gap-3">
+          <div 
+            className="rounded-circle d-flex align-items-center justify-content-center shadow-xs flex-shrink-0"
+            style={{ width: '42px', height: '42px', backgroundColor: '#FDE68A', color: '#D97706' }}
+          >
+            <Coins size={22} />
+          </div>
+          <div>
+            <div className="d-flex align-items-center gap-2">
+              <h6 className="fw-bold text-dark mb-0" style={{ fontSize: '0.95rem' }}>
+                AI Credit Balance: {data.credits ?? user?.credits ?? 100} Credits
+              </h6>
+              <span className="badge rounded-pill bg-amber-200 text-amber-900 small" style={{ fontSize: '0.7rem' }}>
+                {Math.floor((data.credits ?? user?.credits ?? 100) / 50)} Sessions Available
+              </span>
+            </div>
+            <p className="text-secondary small mb-0" style={{ fontSize: '0.8rem' }}>
+              Each comprehensive 5-question AI Technical Interview costs 50 credits.
+            </p>
+          </div>
+        </div>
+
+        <div className="d-flex align-items-center gap-2">
+          {onOpenCreditModal && (
+            <button
+              onClick={onOpenCreditModal}
+              className="btn btn-sm btn-dark rounded-pill px-3 py-1.5 fw-semibold d-flex align-items-center gap-1.5 shadow-xs"
+              style={{ fontSize: '0.82rem' }}
+            >
+              <Coins size={14} className="text-amber-400" />
+              <span>Refill Credits</span>
+            </button>
+          )}
+          <button
+            onClick={() => {
+              if (onNavigateToInterview) {
+                onNavigateToInterview();
+              } else {
+                onOpenMockTest();
+              }
+            }}
+            className="btn btn-sm btn-primary rounded-pill px-3.5 py-1.5 fw-bold d-flex align-items-center gap-1.5 shadow-xs"
+            style={{ fontSize: '0.82rem' }}
+          >
+            <span>Launch AI Interview</span>
+            <ArrowRight size={14} />
+          </button>
+        </div>
+      </div>
+
       {/* 2. TOP ROW METRICS GRID (4 Columns) */}
       <div className="row g-3 mb-4">
         {/* CARD 1: Interview Readiness */}
@@ -311,7 +374,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
                 <div className="position-absolute top-50 start-50 translate-middle text-center">
                   <div className="fw-bold lh-1" style={{ fontSize: '1.85rem', color: '#0F172A' }}>
-                    78
+                    {data.interviewReadiness?.overallScore ?? 78}
                   </div>
                   <div className="text-secondary small mt-0.5" style={{ fontSize: '0.72rem' }}>
                     / 100
@@ -322,10 +385,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               {/* Status Below Ring */}
               <div className="text-center mt-1">
                 <div className="fw-bold" style={{ color: '#D97706', fontSize: '0.82rem' }}>
-                  Almost Ready
+                  {data.interviewReadiness?.status || 'Almost Ready'}
                 </div>
                 <div className="text-secondary" style={{ fontSize: '0.74rem' }}>
-                  Keep practicing to reach 90+
+                  {data.interviewReadiness?.description || 'Keep practicing to reach 90+'}
                 </div>
               </div>
             </div>
@@ -356,14 +419,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <div className="d-flex align-items-center gap-2 mb-1">
                 <BarChart3 size={24} style={{ color: '#2563EB' }} />
                 <span className="fw-bold" style={{ fontSize: '2.1rem', color: '#0F172A', letterSpacing: '-0.02em' }}>
-                  82%
+                  {data.recentInterview?.score ? `${data.recentInterview.score}%` : '82%'}
                 </span>
               </div>
-              <div className="fw-semibold" style={{ color: '#0F172A', fontSize: '0.85rem' }}>
-                Technical Interview
+              <div className="fw-semibold text-truncate max-w-xs" style={{ color: '#0F172A', fontSize: '0.85rem' }}>
+                {data.recentInterview?.title || 'Technical Interview'}
               </div>
               <div className="text-secondary small" style={{ fontSize: '0.75rem' }}>
-                1 Sep 2025
+                {data.recentInterview?.date || 'Recent'}
               </div>
             </div>
 
@@ -402,11 +465,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
             <div className="my-1">
               <div className="fw-bold" style={{ fontSize: '1.6rem', color: '#0F172A' }}>
-                12
+                {data.stats.interviewsTaken}
               </div>
             </div>
             <div className="small fw-medium" style={{ color: '#10B981', fontSize: '0.72rem' }}>
-              ↑ +3 this month
+              {data.stats.interviewsDelta}
             </div>
           </div>
 
@@ -428,11 +491,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
             <div className="my-1">
               <div className="fw-bold" style={{ fontSize: '1.6rem', color: '#0F172A' }}>
-                18 hrs
+                {data.stats.practiceTimeHours} hrs
               </div>
             </div>
             <div className="small fw-medium" style={{ color: '#10B981', fontSize: '0.72rem' }}>
-              ↑ +5 hrs this week
+              {data.stats.practiceTimeDelta}
             </div>
           </div>
         </div>
@@ -456,7 +519,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </p>
 
               <button
-                onClick={onOpenMockTest}
+                onClick={() => {
+                  if (onNavigateToInterview) {
+                    onNavigateToInterview();
+                  } else {
+                    onOpenMockTest();
+                  }
+                }}
                 className="btn btn-sm bg-white fw-semibold rounded-pill px-3 py-1.5 d-inline-flex align-items-center gap-1.5 shadow-sm"
                 style={{ color: '#1D4ED8', fontSize: '0.8rem', border: 'none' }}
               >
@@ -876,10 +945,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   </div>
                   <div className="text-truncate">
                     <div className="fw-bold text-dark text-truncate" style={{ fontSize: '0.82rem' }}>
-                      Analyzed Resume
+                      Completed Coding Challenge
                     </div>
                     <div className="text-secondary small" style={{ fontSize: '0.72rem' }}>
-                      Updated ATS score to 86%
+                      Solved 3 medium-level problems
                     </div>
                   </div>
                 </div>
@@ -1271,10 +1340,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       </div>
 
       {/* 5. INTERACTIVE ACTION MODALS */}
-      <ResumeAnalyzerModal
-        isOpen={isResumeModalOpen}
-        onClose={() => setIsResumeModalOpen(false)}
-      />
+
 
       <CodingInterviewModal
         isOpen={isCodingModalOpen}

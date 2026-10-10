@@ -47,12 +47,16 @@ import {
   ShieldAlert,
   CheckCircle,
   HelpCircle,
-  Info
+  Info,
+  Sparkles as SparklesIcon
 } from 'lucide-react';
+import { TechnicalInterviewStudio } from '../../components/interview/TechnicalInterviewStudio.tsx';
 
 interface AIInterviewViewProps {
   onOpenUpgradeModal?: () => void;
   onNavigateToProfile?: () => void;
+  onOpenCreditModal?: () => void;
+  onOpenHistoryModal?: () => void;
 }
 
 interface SubmittedAnswerItem {
@@ -64,16 +68,18 @@ interface SubmittedAnswerItem {
   status: 'submitted' | 'timed-out';
 }
 
-type MainTab = 'live-interview' | 'skill-matrix';
+type MainTab = 'studio' | 'live-interview' | 'skill-matrix';
 
 export const AIInterviewView: React.FC<AIInterviewViewProps> = ({
   onOpenUpgradeModal,
-  onNavigateToProfile
+  onNavigateToProfile,
+  onOpenCreditModal,
+  onOpenHistoryModal,
 }) => {
   const { user, updateProfileState } = useAuth();
 
-  // Active View Tab: Live Timed Interview vs Skill 3-Level Question Matrix
-  const [activeMainTab, setActiveMainTab] = useState<MainTab>('live-interview');
+  // Active View Tab: AI Smart Studio vs Timed Assessment vs Skill Question Matrix
+  const [activeMainTab, setActiveMainTab] = useState<MainTab>('studio');
 
   // Candidate context from Profile & Resume
   const candidateName = user?.profile?.name || 'Alex Sharma';
@@ -425,8 +431,19 @@ export const AIInterviewView: React.FC<AIInterviewViewProps> = ({
           </div>
         </div>
 
-        {/* View Switcher Tabs (Live Interview vs Skill 3-Level Matrix) */}
+        {/* View Switcher Tabs (Studio vs Timed Assessment vs Question Bank) */}
         <div className="d-flex align-items-center gap-1.5 p-1 rounded-3 bg-light border shadow-2xs">
+          <button
+            type="button"
+            onClick={() => setActiveMainTab('studio')}
+            className={`btn btn-sm px-3 py-1.5 rounded-2 fw-semibold d-flex align-items-center gap-1.5 ${
+              activeMainTab === 'studio' ? 'btn-primary text-white shadow-xs' : 'btn-light text-secondary'
+            }`}
+            style={{ fontSize: '0.80rem' }}
+          >
+            <SparklesIcon size={14} />
+            <span>AI Smart Studio</span>
+          </button>
           <button
             type="button"
             onClick={() => setActiveMainTab('live-interview')}
@@ -436,7 +453,7 @@ export const AIInterviewView: React.FC<AIInterviewViewProps> = ({
             style={{ fontSize: '0.80rem' }}
           >
             <Play size={14} />
-            <span>Live Timed Interview</span>
+            <span>Timed Assessment</span>
           </button>
           <button
             type="button"
@@ -447,7 +464,7 @@ export const AIInterviewView: React.FC<AIInterviewViewProps> = ({
             style={{ fontSize: '0.80rem' }}
           >
             <Layers size={14} />
-            <span>Skills 3-Level Question Bank</span>
+            <span>Question Bank</span>
           </button>
         </div>
       </div>
@@ -546,6 +563,16 @@ export const AIInterviewView: React.FC<AIInterviewViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* VIEW TAB 0: AI SMART INTERVIEW STUDIO (TECHNICAL ENGINE) */}
+      {activeMainTab === 'studio' && (
+        <div className="mb-4">
+          <TechnicalInterviewStudio
+            onOpenCreditModal={onOpenCreditModal || (() => {})}
+            onOpenHistoryModal={onOpenHistoryModal || (() => {})}
+          />
+        </div>
+      )}
 
       {/* VIEW TAB 1: LIVE TIMED INTERVIEW CONSOLE */}
       {activeMainTab === 'live-interview' && (

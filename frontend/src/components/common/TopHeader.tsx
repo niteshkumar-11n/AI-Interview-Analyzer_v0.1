@@ -10,7 +10,8 @@ import {
   Sparkles, 
   Menu,
   LogIn,
-  UserPlus
+  UserPlus,
+  Coins
 } from 'lucide-react';
 
 interface TopHeaderProps {
@@ -21,6 +22,7 @@ interface TopHeaderProps {
   onSearch?: (query: string) => void;
   onOpenLogin?: () => void;
   onOpenRegister?: () => void;
+  onOpenCreditModal?: () => void;
 }
 
 export const TopHeader: React.FC<TopHeaderProps> = ({
@@ -31,6 +33,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   onSearch,
   onOpenLogin,
   onOpenRegister,
+  onOpenCreditModal,
 }) => {
   const { user, logout, isAuthenticated } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
@@ -113,8 +116,35 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
         </form>
       </div>
 
-      {/* Right side: Notifications + (Login/Register buttons OR Profile Dropdown) */}
+      {/* Right side: Credits Pill + Notifications + (Login/Register buttons OR Profile Dropdown) */}
       <div className="d-flex align-items-center gap-2 gap-md-3">
+        {/* Credits Balance Pill */}
+        <button
+          type="button"
+          onClick={() => {
+            if (!isAuthenticated) {
+              if (onOpenLogin) onOpenLogin();
+            } else if (onOpenCreditModal) {
+              onOpenCreditModal();
+            }
+          }}
+          className="btn btn-sm d-flex align-items-center gap-1.5 px-2.5 py-1.5 rounded-pill border shadow-xs"
+          style={{
+            backgroundColor: '#FFFBEB',
+            borderColor: '#FDE68A',
+            color: '#B45309'
+          }}
+          title="Click to view Credit Wallet & Packages"
+        >
+          <Coins size={16} className="text-amber-500 flex-shrink-0" />
+          <span className="fw-bold text-dark small" style={{ fontSize: '0.82rem' }}>
+            {isAuthenticated ? (user?.credits ?? 100) : '—'}
+          </span>
+          <span className="text-secondary small d-none d-sm-inline" style={{ fontSize: '0.74rem' }}>
+            Credits
+          </span>
+        </button>
+
         {/* Notification Bell */}
         <div className="position-relative" ref={notifRef}>
           <button

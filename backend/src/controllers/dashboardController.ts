@@ -13,6 +13,9 @@ import {
   InterviewHistory,
 } from '../models/Dashboard.ts';
 import { AuthenticatedRequest } from '../middleware/authMiddleware.ts';
+import { getUserInterviews } from '../models/Interview.ts';
+import { getUserCredits } from '../models/User.ts';
+import { getUserTransactions } from '../models/Transaction.ts';
 
 export async function getDashboard(req: AuthenticatedRequest, res: Response) {
   let userSkills = [
@@ -25,6 +28,18 @@ export async function getDashboard(req: AuthenticatedRequest, res: Response) {
     { name: 'Communication', percentage: 68, level: 'Intermediate' }
   ];
   let candidateName = 'Guest';
+  let credits = 100;
+  let recentInterviewHistory: any[] = [];
+  let userTransactions: any[] = [];
+  let dynamicWeakAreas = weakAreas;
+  let dynamicStats = {
+    interviewsTaken: 0,
+    interviewsDelta: 'Start your 1st session',
+    practiceTimeHours: 0,
+    practiceTimeDelta: '+0 hrs this week'
+  };
+  let recentInterviewData: any = null;
+  let readinessScore = 78;
 
   if (req.user?.id) {
     const user = await findUserById(req.user.id);
@@ -34,37 +49,108 @@ export async function getDashboard(req: AuthenticatedRequest, res: Response) {
         userSkills = user.profile.skills as any;
       }
     }
+
+    // Real wallet credit balance
+    credits = await getUserCredits(req.user.id);
+
+    // Real user transaction activity
+    userTransactions = await getUserTransactions(req.user.id, 5);
+
+    // Real database interviews
+    const realInterviews = await getUserInterviews(req.user.id);
+    const completedInterviews = realInterviews.filter(i => i.status === 'completed');
+
+    if (completedInterviews.length > 0) {
+      dynamicStats.interviewsTaken = completedInterviews.length;
+      dynamicStats.interviewsDelta = `+${completedInterviews.length} completed`;
+      dynamicStats.practiceTimeHours = Math.round(completedInterviews.length * 0.5);
+
+      const latest = completedInterviews[0];
+      const latestScoreOutOf100 = Math.round(latest.finalScore * 10);
+      recentInterviewData = {
+        id: latest.id,
+        title: `${latest.role} Interview`,
+        score: latestScoreOutOf100,
+        rawScore: latest.finalScore,
+        date: new Date(latest.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
+        technical: Math.round(latest.correctnessAvg * 10),
+        problemSolving: Math.round(latest.confidenceAvg * 10),
+        communication: Math.round(latest.communicationAvg * 10),
+        codeQuality: Math.round(latest.correctnessAvg * 10)
+      };
+
+      // Calculate average score for readiness
+      const totalScoreSum = completedInterviews.reduce((acc, curr) => acc + (curr.finalScore * 10), 0);
+      readinessScore = Math.min(100, Math.round(totalScoreSum / completedInterviews.length));
+
+      // Extract real weak areas from interview sessions
+      const topics = new Set<string>();
+      completedInterviews.forEach(i => {
+        i.recommendedPracticeTopics?.forEach(t => topics.add(t));
+      });
+      if (topics.size > 0) {
+        dynamicWeakAreas = Array.from(topics).slice(0, 5).map((t, idx) => ({
+          id: String(idx + 1),
+          title: t
+        }));
+      }
+
+      recentInterviewHistory = completedInterviews.slice(0, 5).map(i => ({
+        id: i.id,
+        title: `${i.role} (${i.mode})`,
+        score: Math.round(i.finalScore * 10),
+        rawScore: i.finalScore,
+        date: new Date(i.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
+        category: i.category,
+        experience: i.experience,
+        status: i.status
+      }));
+    }
   }
+
+  // Determine readiness status label
+  const readinessStatus =
+    readinessScore >= 85 ? 'Job Ready' :
+    readinessScore >= 70 ? 'Almost Ready' :
+    'Needs Practice';
+
+  const readinessDesc =
+    readinessScore >= 85 ? 'Outstanding readiness across modules!' :
+    readinessScore >= 70 ? 'Keep practicing to reach 85+' :
+    'Complete technical interviews to boost readiness';
 
   res.json({
     success: true,
     data: {
       candidateName,
+      credits,
       interviewReadiness: {
-        overallScore: 78,
-        status: 'Almost Ready',
-        description: 'Keep practicing to reach 90+'
+        overallScore: readinessScore,
+        status: readinessStatus,
+        description: readinessDesc
       },
-      recentInterview: interviewRecords[0] || {
-        title: 'Technical Interview',
+      recentInterview: recentInterviewData || interviewRecords[0] || {
+        title: 'Full Stack Technical Interview',
         score: 82,
-        date: '1 Sep 2025'
+        date: 'Recent'
       },
-      stats: {
-        interviewsTaken: 12,
-        interviewsDelta: '+3 this month',
-        practiceTimeHours: 18,
-        practiceTimeDelta: '+5 hrs this week'
+      stats: dynamicStats.interviewsTaken > 0 ? dynamicStats : {
+        interviewsTaken: 0,
+        interviewsDelta: 'Ready for first test',
+        practiceTimeHours: 0,
+        practiceTimeDelta: 'Get started today'
       },
       skills: userSkills,
-      weakAreas,
+      weakAreas: dynamicWeakAreas,
       recommendedJobs,
       recommendedIssues: openSourceIssues,
       recentActivities: activities,
+      recentInterviewHistory,
+      recentTransactions: userTransactions,
       scoreHistory: [
         { month: 'Jul', score: 60 },
         { month: 'Aug', score: 68 },
-        { month: 'Sep', score: 82 }
+        { month: 'Sep', score: readinessScore }
       ]
     }
   });

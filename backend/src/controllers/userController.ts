@@ -50,3 +50,75 @@ export async function updateProfile(req: AuthenticatedRequest, res: Response) {
     return res.status(500).json({ success: false, message: 'Internal server error.' });
   }
 }
+
+/**
+ * Saves onboarding step progress so user can resume anytime after page refresh
+ */
+export async function saveOnboardingStep(req: AuthenticatedRequest, res: Response) {
+  try {
+    if (!req.user?.id) {
+      return res.status(401).json({ success: false, message: 'Authentication required.' });
+    }
+
+    const { step, careerStatus, data } = req.body;
+    const user = await findUserById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found.' });
+    }
+
+    const isLastStep = step === 3;
+    const updates: any = {
+      ...(data || {}),
+      careerStatus: careerStatus || user.profile?.careerStatus || 'student',
+      onboardingStatus: {
+        isCompleted: isLastStep,
+        step: Number(step) || 1,
+        careerStatus: careerStatus || user.profile?.careerStatus || 'student'
+      }
+    };
+
+    const updated = await updateUserProfile(req.user.id, updates);
+
+    return res.json({
+      success: true,
+      message: isLastStep ? 'Onboarding completed!' : `Step ${step} progress saved.`,
+      profile: updated
+    });
+  } catch (err: any) {
+    console.error('saveOnboardingStep error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to save onboarding progress.' });
+  }
+}
+
+/**
+ * Skips the optional resume upload and marks onboarding as completed
+ */
+export async function skipOnboardingResume(req: AuthenticatedRequest, res: Response) {
+  try {
+    if (!req.user?.id) {
+      return res.status(401).json({ success: false, message: 'Authentication required.' });
+    }
+
+    const user = await findUserById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found.' });
+    }
+
+    const updated = await updateUserProfile(req.user.id, {
+      onboardingStatus: {
+        isCompleted: true,
+        step: 3,
+        careerStatus: user.profile?.careerStatus || 'student'
+      }
+    });
+
+    return res.json({
+      success: true,
+      message: 'Onboarding completed. Welcome to your dashboard!',
+      profile: updated
+    });
+  } catch (err: any) {
+    console.error('skipOnboardingResume error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to complete onboarding.' });
+  }
+}

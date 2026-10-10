@@ -78,3 +78,18 @@ body {
   box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.04);
 }
 
+/* Spin animation for loading indicators */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+/* Smooth transitions for interactive elements */
+.transition-all {
+  transition: all 0.2s ease-in-out;
+}
+
