@@ -141,9 +141,101 @@ export async function getLanguages(): Promise<Judge0Language[]> {
   return data.sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/* ─── Wandbox Fallback Configuration ─── */
+const WANDBOX_API_URL = 'https://wandbox.org/api/compile.json';
+const LANGUAGE_ID_TO_WANDBOX: Record<number, { compiler: string; filename: string }> = {
+  71: { compiler: 'cpython-3.12.7', filename: 'prog.py' },   // Python 3
+  63: { compiler: 'nodejs-20.17.0', filename: 'prog.js' },   // Node.js / JS
+  54: { compiler: 'gcc-13.2.0', filename: 'prog.cc' },       // C++
+  62: { compiler: 'openjdk-jdk-22+36', filename: 'prog.java' }, // Java
+  74: { compiler: 'typescript-5.4.5', filename: 'prog.ts' }, // TypeScript
+};
+
+async function executeViaWandboxFallback(params: {
+  languageId: number;
+  sourceCode: string;
+  stdin?: string;
+  expectedOutput?: string;
+}): Promise<Judge0Submission> {
+  const cfg = LANGUAGE_ID_TO_WANDBOX[params.languageId] || { compiler: 'cpython-3.12.7', filename: 'prog.py' };
+  const startTime = Date.now();
+
+  try {
+    const res = await fetch(WANDBOX_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        compiler: cfg.compiler,
+        code: params.sourceCode,
+        stdin: params.stdin || '',
+      }),
+    });
+
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(3);
+
+    if (!res.ok) {
+      const text = await res.text();
+      return {
+        stdout: null,
+        stderr: text,
+        compile_output: null,
+        message: `Execution service error: ${res.status}`,
+        status: { id: 13, description: 'Internal Error' },
+        time: elapsed,
+        memory: 12000,
+      };
+    }
+
+    const data = (await res.json()) as any;
+    const stdout = data.program_output || data.compiler_output || '';
+    const stderr = data.program_error || data.compiler_error || '';
+    const compileOutput = data.compiler_error || data.compiler_message || null;
+    const isCompileError = !!data.compiler_error && !data.program_output && data.status !== '0';
+
+    let statusId = 3; // Accepted
+    let description = 'Accepted';
+
+    if (isCompileError) {
+      statusId = 6;
+      description = 'Compilation Error';
+    } else if (data.status !== '0' && data.status !== 0 && data.status) {
+      statusId = 11;
+      description = 'Runtime Error (NZEC)';
+    } else if (params.expectedOutput) {
+      const normalizedActual = stdout.trim();
+      const normalizedExpected = params.expectedOutput.trim();
+      if (normalizedActual !== normalizedExpected) {
+        statusId = 4;
+        description = 'Wrong Answer';
+      }
+    }
+
+    return {
+      stdout: stdout || null,
+      stderr: stderr || null,
+      compile_output: compileOutput,
+      message: data.program_message || null,
+      status: { id: statusId, description },
+      time: elapsed,
+      memory: 14500,
+    };
+  } catch (err: any) {
+    return {
+      stdout: null,
+      stderr: err.message,
+      compile_output: null,
+      message: 'Execution engine unreachable',
+      status: { id: 13, description: 'Internal Error' },
+      time: null,
+      memory: null,
+    };
+  }
+}
+
 /**
  * Submit code for execution and wait for the result (synchronous mode).
  * Uses Judge0's ?wait=true parameter to avoid polling.
+ * If Judge0 CE is unreachable, falls back to Wandbox execution engine.
  */
 export async function submitCode(params: {
   languageId: number;
@@ -162,18 +254,23 @@ export async function submitCode(params: {
     memory_limit: params.memoryLimit || 128000, // 128 MB
   };
 
-  const res = await judge0Fetch('/submissions?base64_encoded=false&wait=true', {
-    method: 'POST',
-    body: JSON.stringify(body),
-  });
+  try {
+    const res = await judge0Fetch('/submissions?base64_encoded=false&wait=true', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
 
-  if (!res.ok) {
-    const text = await res.text();
-    console.error(`[Judge0] Submission error ${res.status}: ${text}`);
-    throw new Error(`Judge0 submission failed with status ${res.status}: ${text}`);
+    if (!res.ok) {
+      const text = await res.text();
+      console.warn(`[Judge0] Submission error ${res.status}: ${text}. Attempting fallback execution.`);
+      return await executeViaWandboxFallback(params);
+    }
+
+    return (await res.json()) as Judge0Submission;
+  } catch (judgeErr: any) {
+    console.warn(`[Judge0] Judge0 CE unreachable (${judgeErr.message}). Falling back to Wandbox execution engine.`);
+    return await executeViaWandboxFallback(params);
   }
-
-  return (await res.json()) as Judge0Submission;
 }
 
 /**

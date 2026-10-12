@@ -33,6 +33,7 @@ export interface IInterviewDocument extends Document {
   communicationAvg: number;
   correctnessAvg: number;
   recommendedPracticeTopics: string[];
+  overallFeedback?: string;
   status: 'in-progress' | 'completed' | 'abandoned';
   createdAt: Date;
   updatedAt: Date;
@@ -52,6 +53,7 @@ export interface InterviewRecord {
   communicationAvg: number;
   correctnessAvg: number;
   recommendedPracticeTopics: string[];
+  overallFeedback?: string;
   status: 'in-progress' | 'completed' | 'abandoned';
   createdAt: string;
   updatedAt: string;
@@ -95,6 +97,7 @@ const InterviewSchema = new Schema<IInterviewDocument>(
     communicationAvg: { type: Number, default: 0 },
     correctnessAvg: { type: Number, default: 0 },
     recommendedPracticeTopics: [{ type: String }],
+    overallFeedback: { type: String, default: '' },
     status: {
       type: String,
       enum: ['in-progress', 'completed', 'abandoned'],

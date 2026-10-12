@@ -22,7 +22,8 @@ import {
   generateTechnicalQuestions,
   evaluateTechnicalAnswer
 } from '../services/interview/interviewAiService.ts';
-import { activities } from '../models/Dashboard.ts';
+import { activities, interviewRecords } from '../models/Dashboard.ts';
+import { CandidateContextService } from '../services/candidate/candidateContextService.ts';
 
 /**
  * Generate technical interview questions and reserve/deduct session credits
@@ -55,17 +56,57 @@ export async function generateInterview(req: AuthenticatedRequest, res: Response
       });
     }
 
+    // Enrich with candidate context (profile + confirmed resume facts)
+    let enrichedSkills = Array.isArray(skills) ? skills : [];
+    let candidateProjects: any[] = Array.isArray(projects) ? projects : [];
+    let candidateExperience: any[] = [];
+    let candidateSummary = '';
+    let candidatePreviousQuestions: string[] = [];
+
+    try {
+      const candidateCtx = await CandidateContextService.getContextForInterview(req.user.id);
+      if (candidateCtx) {
+        if (candidateCtx.skills && candidateCtx.skills.length > 0) {
+          // Merge request skills with profile-derived skills (dedup)
+          const skillSet = new Set(enrichedSkills.map((s: string) => s.toLowerCase()));
+          for (const s of candidateCtx.skills) {
+            if (!skillSet.has(s.toLowerCase())) {
+              enrichedSkills.push(s);
+              skillSet.add(s.toLowerCase());
+            }
+          }
+        }
+        if (candidateCtx.projects && candidateCtx.projects.length > 0) {
+          candidateProjects = candidateCtx.projects;
+        }
+        if (candidateCtx.workExperience && candidateCtx.workExperience.length > 0) {
+          candidateExperience = candidateCtx.workExperience;
+        }
+        if (candidateCtx.summary) {
+          candidateSummary = candidateCtx.summary;
+        }
+        if (candidateCtx.previousQuestions && candidateCtx.previousQuestions.length > 0) {
+          candidatePreviousQuestions = candidateCtx.previousQuestions;
+        }
+      }
+    } catch (ctxErr) {
+      console.warn('[InterviewController] Candidate context unavailable, using request skills:', ctxErr);
+    }
+
     let questions;
     try {
-      // 2. Generate progressive technical questions
+      // 2. Generate progressive personalized questions
       questions = await generateTechnicalQuestions({
         role: role.trim(),
         category: category?.trim() || 'Full Stack',
         experience: experience.trim(),
         difficulty: difficulty?.trim() || 'Intermediate',
         mode: mode === 'HR' ? 'HR' : 'Technical',
-        skills: Array.isArray(skills) ? skills : [],
-        projects: Array.isArray(projects) ? projects : []
+        skills: enrichedSkills,
+        projects: candidateProjects,
+        workExperience: candidateExperience,
+        summary: candidateSummary,
+        previousQuestions: candidatePreviousQuestions
       });
     } catch (aiErr: any) {
       // Automatic credit refund on generation failure
@@ -163,7 +204,8 @@ export async function submitAnswer(req: AuthenticatedRequest, res: Response) {
       answer: String(answer || ''),
       timeTaken: Number(timeTaken) || 0,
       timeLimit: targetQuestion.timeLimit,
-      role: interview.role
+      role: interview.role,
+      mode: interview.mode
     });
 
     // Update question record
@@ -249,28 +291,48 @@ export async function finishInterview(req: AuthenticatedRequest, res: Response) 
       }
     });
 
-    const finalScore = totalQuestions ? Number((totalScore / totalQuestions).toFixed(1)) : 0;
+    const finalScoreOutOf10 = totalQuestions ? Number((totalScore / totalQuestions).toFixed(1)) : 0;
+    const scoreOutOf100 = Math.round(finalScoreOutOf10 * 10);
     const confidenceAvg = totalQuestions ? Number((totalConfidence / totalQuestions).toFixed(1)) : 0;
     const communicationAvg = totalQuestions ? Number((totalCommunication / totalQuestions).toFixed(1)) : 0;
     const correctnessAvg = totalQuestions ? Number((totalCorrectness / totalQuestions).toFixed(1)) : 0;
     const recommendedPracticeTopics = Array.from(weakTopicsSet).slice(0, 5);
 
+    const overallFeedback = scoreOutOf100 >= 80
+      ? `Exceptional ${interview.mode} interview performance! You demonstrated outstanding clarity, strong conceptual mastery, and articulate communication across all 5 questions.`
+      : scoreOutOf100 >= 60
+      ? `Strong ${interview.mode} interview performance (${scoreOutOf100}/100). You answered key concepts well, with room for improvement in deeper edge-case coverage and structured answer delivery.`
+      : `Good attempt on this ${interview.mode} interview (${scoreOutOf100}/100). Focus on reviewing core principles, time management, and organizing responses clearly before your live interviews.`;
+
     await updateInterviewSession(interviewId, {
-      finalScore,
+      finalScore: finalScoreOutOf10,
       confidenceAvg,
       communicationAvg,
       correctnessAvg,
       recommendedPracticeTopics,
+      overallFeedback,
       status: 'completed'
     });
 
     // Record activity in dashboard activity log
     activities.unshift({
       id: `act_${Date.now()}`,
-      title: `Completed ${interview.role} Interview`,
-      subtitle: `Score: ${finalScore}/10 (${Math.round((finalScore / 10) * 100)}%)`,
+      title: `Completed ${interview.role} (${interview.mode}) Interview`,
+      subtitle: `Score: ${scoreOutOf100}/100 • Just now`,
       timeAgo: 'Just now',
       type: 'interview'
+    });
+
+    // Also update interviewRecords for instant reflection on dashboard
+    interviewRecords.unshift({
+      id: interview.id,
+      title: `${interview.role} (${interview.mode}) Interview`,
+      score: scoreOutOf100,
+      date: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
+      technical: Math.round(correctnessAvg * 10),
+      problemSolving: Math.round(confidenceAvg * 10),
+      communication: Math.round(communicationAvg * 10),
+      codeQuality: Math.round(correctnessAvg * 10)
     });
 
     return res.json({
@@ -278,11 +340,14 @@ export async function finishInterview(req: AuthenticatedRequest, res: Response) 
       data: {
         interviewId: interview.id,
         role: interview.role,
-        finalScore,
+        mode: interview.mode,
+        finalScore: finalScoreOutOf10,
+        scoreOutOf100,
         confidence: confidenceAvg,
         communication: communicationAvg,
         correctness: correctnessAvg,
         recommendedPracticeTopics,
+        overallFeedback,
         status: 'completed',
         questionWiseScore: interview.questions.map((q, i) => ({
           questionNumber: i + 1,

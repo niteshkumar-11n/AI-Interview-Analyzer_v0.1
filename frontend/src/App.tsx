@@ -15,6 +15,7 @@ import { SettingsModal } from './components/common/SettingsModal.tsx';
 import { SupportModal } from './components/common/SupportModal.tsx';
 import { CreditWalletModal } from './components/payment/CreditWalletModal.tsx';
 import { InterviewHistoryModal } from './components/interview/InterviewHistoryModal.tsx';
+import { OnboardingWizardModal } from './components/onboarding/OnboardingWizardModal.tsx';
 import { JobMatchingView } from './pages/jobs/JobMatchingView.tsx';
 import { JobRecommendationsView } from './pages/jobs/JobRecommendationsView.tsx';
 import { AIInterviewView } from './pages/interview/AIInterviewView.tsx';
@@ -23,9 +24,16 @@ import { InterviewReadinessView } from './pages/interview/InterviewReadinessView
 import { GitHubOpenSourceView } from './pages/github/GitHubOpenSourceView.tsx';
 import { AnalyticsView } from './pages/analytics/AnalyticsView.tsx';
 import { RecommendedJob, OpenSourceIssue } from './types.ts';
+import { LandingPage } from './pages/landing/LandingPage.tsx';
 
 function AppContent() {
-  const { isAuthenticated } = useAuth();
+  const { user, isAuthenticated } = useAuth();
+  // Onboarding wizard opens automatically if authenticated candidate has incomplete profile
+  const showOnboarding = Boolean(
+    isAuthenticated &&
+    user &&
+    user.profile?.onboardingStatus?.isCompleted === false
+  );
   // Default first view is dashboard
   const [currentView, setCurrentView] = useState<ViewType>('dashboard');
   const [activeNav, setActiveNav] = useState<NavItemKey>('dashboard');
@@ -169,6 +177,34 @@ function AppContent() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  // If user is not authenticated, render the public SkillNexus Landing Page
+  if (!isAuthenticated) {
+    return (
+      <div className="min-vh-100 bg-white">
+        <LandingPage
+          onOpenLogin={handleOpenLogin}
+          onOpenRegister={handleOpenRegister}
+          isAuthenticated={false}
+          onNavigateToDashboard={() => {
+            handleNavigate('dashboard', 'dashboard');
+          }}
+        />
+
+        {/* Auth Modal for Login & Register */}
+        <AuthModal
+          isOpen={isAuthModalOpen}
+          onClose={() => setIsAuthModalOpen(false)}
+          initialMode={authInitialMode}
+          onSuccess={() => {
+            setIsAuthModalOpen(false);
+            setCurrentView('dashboard');
+            setActiveNav('dashboard');
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="d-flex min-vh-100" style={{ backgroundColor: '#F8FAFC' }}>
       {/* Dark Navy Sidebar on Left */}
@@ -233,6 +269,7 @@ function AppContent() {
                     onNavigateToProfile={() => handleNavigate('profile', 'profile')}
                     onOpenCreditModal={() => setIsCreditModalOpen(true)}
                     onOpenHistoryModal={() => setIsHistoryModalOpen(true)}
+                    onNavigateToDashboard={() => handleNavigate('dashboard', 'dashboard')}
                   />
                 ) : currentView === 'dashboard' ? (
                   <DashboardView
@@ -240,6 +277,7 @@ function AppContent() {
                     onNavigateToProfile={() => handleNavigate('profile', 'profile')}
                     onOpenCreditModal={() => setIsCreditModalOpen(true)}
                     onNavigateToInterview={() => handleNavigate('ai-interview', 'ai-interview')}
+                    onNavigateToCoding={() => handleNavigate('coding-interview', 'coding-interview')}
                   />
                 ) : currentView === 'job-matching' ? (
                   <JobMatchingView
@@ -267,12 +305,13 @@ function AppContent() {
               <footer className="bg-white border-top py-3 px-4 text-secondary small mt-auto">
                 <div className="d-flex flex-wrap justify-content-between align-items-center gap-2">
                   <div>
-                    <strong className="text-dark">CareerCraft AI</strong> &bull; Practice. Improve. Get Hired.
+                    <strong className="text-dark">SkillNexus</strong> &bull; Build Skills. Ace Interviews. Grow Your Career.
                   </div>
                   <div className="d-flex align-items-center gap-2">
                     <span className="badge bg-light text-muted border">MERN Stack</span>
                     <span className="badge bg-light text-muted border">MongoDB Atlas</span>
-                    <span className="badge bg-light text-muted border">JWT Auth</span>
+                    <span className="badge bg-light text-muted border">Judge0 CE</span>
+                    <span className="badge bg-light text-muted border">Gemini AI</span>
                   </div>
                 </div>
               </footer>
@@ -288,6 +327,14 @@ function AppContent() {
         initialMode={authInitialMode}
         onSuccess={() => {
           setIsAuthModalOpen(false);
+        }}
+      />
+
+      {/* Candidate Profile Onboarding Wizard */}
+      <OnboardingWizardModal
+        isOpen={showOnboarding}
+        onComplete={() => {
+          handleNavigate('dashboard', 'dashboard');
         }}
       />
 

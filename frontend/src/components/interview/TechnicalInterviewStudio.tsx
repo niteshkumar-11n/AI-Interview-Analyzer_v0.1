@@ -41,11 +41,13 @@ import autoTable from 'jspdf-autotable';
 interface TechnicalInterviewStudioProps {
   onOpenCreditModal: () => void;
   onOpenHistoryModal: () => void;
+  onNavigateToDashboard?: () => void;
 }
 
 export const TechnicalInterviewStudio: React.FC<TechnicalInterviewStudioProps> = ({
   onOpenCreditModal,
-  onOpenHistoryModal
+  onOpenHistoryModal,
+  onNavigateToDashboard
 }) => {
   const { user } = useAuth();
 
@@ -69,16 +71,15 @@ export const TechnicalInterviewStudio: React.FC<TechnicalInterviewStudioProps> =
   const [answerText, setAnswerText] = useState('');
   const [timeLeft, setTimeLeft] = useState(60);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [feedbackData, setFeedbackData] = useState<{
-    feedback: string;
-    score: number;
-    confidence: number;
-    communication: number;
-    correctness: number;
-    strengths?: string[];
-    improvements?: string[];
-    missingConcepts?: string[];
-  } | null>(null);
+  const [isTimeoutTriggered, setIsTimeoutTriggered] = useState(false);
+
+  // Synchronized refs to prevent stale timer closures
+  const answerTextRef = useRef('');
+  const isSubmittingRef = useRef(false);
+
+  useEffect(() => {
+    answerTextRef.current = answerText;
+  }, [answerText]);
 
   // Audio / Speech State
   const [isMicOn, setIsMicOn] = useState(false);
@@ -222,14 +223,89 @@ export const TechnicalInterviewStudio: React.FC<TechnicalInterviewStudioProps> =
     }
   };
 
+  // ================= SUBMIT ANSWER & ADVANCE =================
+  const submitAnswerAndAdvance = async (candidateAnswer: string, isTimeout: boolean = false) => {
+    if (!session || isSubmittingRef.current || isFinishing) return;
+
+    isSubmittingRef.current = true;
+    setIsSubmitting(true);
+    if (isTimeout) setIsTimeoutTriggered(true);
+
+    // Stop microphone if active
+    if (recognitionRef.current && isMicOn) {
+      try { recognitionRef.current.stop(); } catch {}
+      setIsMicOn(false);
+    }
+
+    // Stop speech synthesis if speaking
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      setIsAiSpeaking(false);
+      if (videoRef.current) {
+        videoRef.current.pause();
+        videoRef.current.currentTime = 0;
+      }
+    }
+
+    const timeLimit = currentQuestion?.timeLimit || 60;
+    const timeSpent = isTimeout ? timeLimit : Math.max(1, timeLimit - timeLeft);
+    const trimmed = (candidateAnswer || '').trim();
+
+    try {
+      await api.interview.submitAnswer({
+        interviewId: session.interviewId,
+        questionIndex: currentIdx,
+        answer: trimmed,
+        timeTaken: Math.max(1, timeSpent)
+      });
+    } catch (err: any) {
+      console.warn('[InterviewStudio] Submit answer warning:', err.message);
+    }
+
+    // Check if more questions remain
+    if (currentIdx + 1 < session.questions.length) {
+      const nextIdx = currentIdx + 1;
+      const nextQ = session.questions[nextIdx];
+      setCurrentIdx(nextIdx);
+      setAnswerText('');
+      answerTextRef.current = '';
+      setIsTimeoutTriggered(false);
+      setTimeLeft(nextQ.timeLimit || 60);
+      setIsSubmitting(false);
+      isSubmittingRef.current = false;
+      // Read the next question
+      speakText(nextQ.question);
+    } else {
+      // Completed all 5 questions -> Finalize interview
+      setIsFinishing(true);
+      try {
+        const res = await api.interview.finish({ interviewId: session.interviewId });
+        if (res.success && res.data) {
+          setReport(res.data);
+          setStep(3);
+        }
+      } catch (err: any) {
+        console.error('[InterviewStudio] Finish interview error:', err);
+        alert('Failed to generate scorecard report: ' + err.message);
+      } finally {
+        setIsSubmitting(false);
+        isSubmittingRef.current = false;
+        setIsFinishing(false);
+        setIsTimeoutTriggered(false);
+      }
+    }
+  };
+
   // ================= QUESTION TIMER =================
   useEffect(() => {
-    if (step !== 2 || !currentQuestion || feedbackData) return;
+    if (step !== 2 || !currentQuestion || isSubmitting || isFinishing) return;
 
     const timer = setInterval(() => {
       setTimeLeft(prev => {
         if (prev <= 1) {
           clearInterval(timer);
+          // Automatically advance when timer runs out
+          submitAnswerAndAdvance(answerTextRef.current, true);
           return 0;
         }
         return prev - 1;
@@ -237,16 +313,17 @@ export const TechnicalInterviewStudio: React.FC<TechnicalInterviewStudioProps> =
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [step, currentIdx, feedbackData]);
+  }, [step, currentIdx, isSubmitting, isFinishing, currentQuestion, session]);
 
-  // Read question aloud when index changes
+  // Read initial question aloud on session start
   useEffect(() => {
-    if (step === 2 && currentQuestion && !feedbackData) {
+    if (step === 2 && currentQuestion && currentIdx === 0) {
       setTimeLeft(currentQuestion.timeLimit || 60);
       setAnswerText('');
+      answerTextRef.current = '';
       speakText(currentQuestion.question);
     }
-  }, [step, currentIdx]);
+  }, [step, session]);
 
   // ================= STEP 1: START INTERVIEW =================
   const handleStartInterview = async () => {
@@ -269,8 +346,8 @@ export const TechnicalInterviewStudio: React.FC<TechnicalInterviewStudioProps> =
 
       setSession(res.data);
       setCurrentIdx(0);
-      setFeedbackData(null);
       setAnswerText('');
+      answerTextRef.current = '';
       setTimeLeft(res.data.questions[0]?.timeLimit || 60);
       setStep(2);
     } catch (err: any) {
@@ -278,62 +355,6 @@ export const TechnicalInterviewStudio: React.FC<TechnicalInterviewStudioProps> =
       setStartError(err.message || 'Failed to start interview. Check credit balance.');
     } finally {
       setIsStarting(false);
-    }
-  };
-
-  // ================= STEP 2: SUBMIT ANSWER =================
-  const handleSubmitAnswer = async () => {
-    if (!session || isSubmitting) return;
-
-    if (recognitionRef.current && isMicOn) {
-      try { recognitionRef.current.stop(); } catch {}
-      setIsMicOn(false);
-    }
-
-    setIsSubmitting(true);
-    const timeSpent = (currentQuestion?.timeLimit || 60) - timeLeft;
-
-    try {
-      const res = await api.interview.submitAnswer({
-        interviewId: session.interviewId,
-        questionIndex: currentIdx,
-        answer: answerText,
-        timeTaken: Math.max(1, timeSpent)
-      });
-
-      if (res.success && res.data) {
-        setFeedbackData(res.data);
-        speakText(res.data.feedback);
-      }
-    } catch (err: any) {
-      console.error('Answer submission error:', err);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  // ================= NEXT QUESTION OR FINISH =================
-  const handleNextQuestion = async () => {
-    if (!session) return;
-
-    if (currentIdx + 1 < session.questions.length) {
-      setCurrentIdx(prev => prev + 1);
-      setFeedbackData(null);
-      setAnswerText('');
-    } else {
-      // Last question completed -> Finish interview session
-      setIsFinishing(true);
-      try {
-        const res = await api.interview.finish({ interviewId: session.interviewId });
-        if (res.success && res.data) {
-          setReport(res.data);
-          setStep(3);
-        }
-      } catch (err: any) {
-        console.error('Finish interview error:', err);
-      } finally {
-        setIsFinishing(false);
-      }
     }
   };
 
@@ -790,8 +811,13 @@ export const TechnicalInterviewStudio: React.FC<TechnicalInterviewStudioProps> =
               <div>
                 {/* Active Question Banner */}
                 <div className="p-3.5 rounded-3 border mb-4 bg-blue-50 border-blue-200">
-                  <div className="text-primary fw-bold small text-uppercase tracking-wider mb-1">
-                    Question {currentIdx + 1}
+                  <div className="d-flex justify-content-between align-items-center mb-1">
+                    <span className="text-primary fw-bold small text-uppercase tracking-wider">
+                      Question {currentIdx + 1} of {session.questions.length}
+                    </span>
+                    <span className="badge bg-primary-subtle text-primary border border-primary-subtle text-uppercase" style={{ fontSize: '0.72rem' }}>
+                      {currentQuestion.difficulty} &bull; {currentQuestion.timeLimit || 60}s limit
+                    </span>
                   </div>
                   <h5 className="fw-bold text-dark mb-0 lh-base" style={{ fontSize: '1.15rem' }}>
                     {currentQuestion.question}
@@ -809,21 +835,29 @@ export const TechnicalInterviewStudio: React.FC<TechnicalInterviewStudioProps> =
 
                   <textarea
                     rows={6}
-                    disabled={Boolean(feedbackData)}
+                    disabled={isSubmitting || isFinishing}
                     className="form-control rounded-3 p-3 text-dark font-monospace"
                     style={{ fontSize: '0.88rem', resize: 'vertical' }}
-                    placeholder="Speak using the microphone button below or type your technical answer here..."
+                    placeholder="Speak using the microphone button below or type your response here..."
                     value={answerText}
                     onChange={(e) => setAnswerText(e.target.value)}
                   />
                 </div>
               </div>
 
-              {/* Bottom Actions: Mic + Submit OR Feedback Banner */}
-              {!feedbackData ? (
-                <div className="d-flex align-items-center gap-3 pt-2">
+              {/* Bottom Actions: Mic + Submit Button */}
+              <div className="pt-2">
+                {isTimeoutTriggered && (
+                  <div className="alert alert-warning py-1.5 px-3 mb-2 small d-flex align-items-center gap-2">
+                    <Clock size={14} className="text-warning flex-shrink-0" />
+                    <span>Time limit reached! Recording response and advancing...</span>
+                  </div>
+                )}
+
+                <div className="d-flex align-items-center gap-3">
                   <button
                     onClick={toggleMic}
+                    disabled={isSubmitting || isFinishing}
                     className={`btn rounded-3 p-3 d-flex align-items-center justify-content-center shadow-xs ${
                       isMicOn ? 'btn-danger' : 'btn-dark'
                     }`}
@@ -834,64 +868,45 @@ export const TechnicalInterviewStudio: React.FC<TechnicalInterviewStudioProps> =
                   </button>
 
                   <button
-                    onClick={handleSubmitAnswer}
-                    disabled={isSubmitting || !answerText.trim()}
-                    className="btn btn-primary flex-grow-1 rounded-3 py-3 fw-bold d-flex align-items-center justify-content-center gap-2 shadow-sm"
+                    onClick={() => submitAnswerAndAdvance(answerText, false)}
+                    disabled={isSubmitting || isFinishing}
+                    className={`btn flex-grow-1 rounded-3 py-3 fw-bold d-flex align-items-center justify-content-center gap-2 shadow-sm ${
+                      currentIdx + 1 === session.questions.length ? 'btn-success' : 'btn-primary'
+                    }`}
+                    style={
+                      currentIdx + 1 === session.questions.length
+                        ? { backgroundColor: '#059669', borderColor: '#059669' }
+                        : {}
+                    }
                   >
-                    {isSubmitting ? (
+                    {isSubmitting || isFinishing ? (
                       <>
                         <Loader2 size={18} className="animate-spin" />
-                        <span>Evaluating Technical Accuracy...</span>
+                        <span>
+                          {currentIdx + 1 === session.questions.length
+                            ? 'Evaluating All 5 Questions & Generating Scorecard...'
+                            : `Saving & Moving to Question ${currentIdx + 2}...`}
+                        </span>
                       </>
                     ) : (
                       <>
-                        <CheckCircle2 size={18} />
-                        <span>Submit Answer for Evaluation</span>
+                        {currentIdx + 1 === session.questions.length ? (
+                          <>
+                            <Award size={18} />
+                            <span>Submit Final Answer &amp; Complete Interview</span>
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle2 size={18} />
+                            <span>Submit Answer &amp; Next Question</span>
+                            <ArrowRight size={18} className="ms-1" />
+                          </>
+                        )}
                       </>
                     )}
                   </button>
                 </div>
-              ) : (
-                /* Instant AI Feedback Banner */
-                <div className="p-4 rounded-3 border bg-emerald-50 border-emerald-200 animate-fade-in">
-                  <div className="d-flex align-items-center justify-content-between mb-2">
-                    <div className="d-flex align-items-center gap-2">
-                      <Award size={20} className="text-emerald-600" />
-                      <h6 className="fw-bold text-dark mb-0">Score: {feedbackData.score} / 10</h6>
-                    </div>
-                    <div className="d-flex gap-3 text-secondary small">
-                      <span>Correctness: <strong>{feedbackData.correctness}/10</strong></span>
-                      <span>Communication: <strong>{feedbackData.communication}/10</strong></span>
-                      <span>Confidence: <strong>{feedbackData.confidence}/10</strong></span>
-                    </div>
-                  </div>
-
-                  <p className="text-emerald-900 small mb-3 leading-relaxed">
-                    "{feedbackData.feedback}"
-                  </p>
-
-                  <div className="d-flex justify-content-end">
-                    <button
-                      onClick={handleNextQuestion}
-                      disabled={isFinishing}
-                      className="btn btn-emerald text-white bg-emerald-600 hover-bg-emerald-700 px-4 py-2 rounded-3 fw-bold d-flex align-items-center gap-2"
-                      style={{ backgroundColor: '#059669' }}
-                    >
-                      {isFinishing ? (
-                        <>
-                          <Loader2 size={16} className="animate-spin" />
-                          <span>Generating Final Scorecard...</span>
-                        </>
-                      ) : (
-                        <>
-                          <span>{currentIdx + 1 < session.questions.length ? 'Next Question' : 'View Full Report'}</span>
-                          <ArrowRight size={16} />
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              )}
+              </div>
             </div>
           </div>
         </div>
@@ -912,11 +927,22 @@ export const TechnicalInterviewStudio: React.FC<TechnicalInterviewStudioProps> =
                 </span>
               </div>
               <h3 className="fw-bold text-dark mb-0" style={{ letterSpacing: '-0.02em' }}>
-                {report.role} — AI Scorecard
+                {report.role} — AI Scorecard &amp; Performance Review
               </h3>
             </div>
 
             <div className="d-flex align-items-center gap-2">
+              {onNavigateToDashboard && (
+                <button
+                  onClick={onNavigateToDashboard}
+                  className="btn btn-outline-secondary rounded-3 px-3.5 py-2 fw-semibold d-flex align-items-center gap-2"
+                  style={{ fontSize: '0.88rem' }}
+                >
+                  <ArrowRight size={16} />
+                  <span>Return to Dashboard</span>
+                </button>
+              )}
+
               <button
                 onClick={handleDownloadPdf}
                 className="btn btn-outline-primary rounded-3 px-3.5 py-2 fw-semibold d-flex align-items-center gap-2"
@@ -935,6 +961,20 @@ export const TechnicalInterviewStudio: React.FC<TechnicalInterviewStudioProps> =
                 <span>Start New Interview</span>
               </button>
             </div>
+          </div>
+
+          {/* Personalized AI Feedback Card */}
+          <div 
+            className="card p-4 border-0 rounded-4 shadow-sm bg-white"
+            style={{ borderLeft: '5px solid #2563EB', background: 'linear-gradient(135deg, #FFFFFF 0%, #F8FAFC 100%)' }}
+          >
+            <div className="d-flex align-items-center gap-2 mb-2">
+              <Sparkles size={20} className="text-primary" />
+              <h5 className="fw-bold text-dark mb-0 fs-6">Personalized AI Evaluation &amp; Feedback</h5>
+            </div>
+            <p className="text-dark mb-0 lh-base" style={{ fontSize: '0.92rem' }}>
+              {report.overallFeedback || `Great job completing the 5-question ${report.role} interview! Your overall score is ${report.scoreOutOf100 || Math.round(report.finalScore * 10)}/100. Review the detailed question breakdown below to target areas for improvement.`}
+            </p>
           </div>
 
           {/* Metrics Overview Grid */}

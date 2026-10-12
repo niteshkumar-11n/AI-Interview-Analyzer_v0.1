@@ -53,7 +53,7 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose }) =
                   <label className="form-label small fw-semibold text-dark">Topic</label>
                   <select className="form-select small">
                     <option>Mock Interview Scheduling & Feedback</option>
-                    <option>Resume Analyzer Scoring Inquiry</option>
+                    <option>Candidate Profile & Skills Inquiry</option>
                     <option>Job Recommendation & Matching</option>
                     <option>Technical Platform Issue</option>
                   </select>

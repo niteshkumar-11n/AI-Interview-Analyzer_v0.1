@@ -37,7 +37,7 @@ export const MockInterviewModal: React.FC<MockInterviewModalProps> = ({
   const { user } = useAuth();
   const candidateName = user?.profile?.name || 'Candidate';
   const [track, setTrack] = useState<InterviewTrack>('Project');
-  const [title, setTitle] = useState('Project Deep-Dive: AI Resume Analyzer & MERN');
+  const [title, setTitle] = useState('Project Deep-Dive: AI Career Platform & MERN');
   const [role, setRole] = useState('Full Stack Engineer (SDE-1)');
   const [overallScore, setOverallScore] = useState(86);
   const [technical, setTechnical] = useState(88);
@@ -91,8 +91,8 @@ export const MockInterviewModal: React.FC<MockInterviewModalProps> = ({
     ],
     Project: [
       {
-        question: 'In your "AI Resume Analyzer" project, how did you handle varied PDF structures and ensure accurate extraction of technical skills and scores?',
-        context: 'Resume Project #1 &bull; AI Resume Analyzer (NLP & Parsing)',
+        question: 'In your career analytics project, how did you handle varied PDF structures and ensure accurate extraction of technical skills and qualifications?',
+        context: 'Profile Project #1 &bull; Document Processing & Parsing',
         keyPoints: ['Text extraction pipeline (pdf-parse)', 'Prompt engineering with structured JSON schema', 'Handling edge-case layouts', 'Error fallback mechanisms']
       },
       {
@@ -121,7 +121,7 @@ export const MockInterviewModal: React.FC<MockInterviewModalProps> = ({
     } else if (newTrack === 'HR') {
       setTitle('HR Behavioral Interview: STAR Competency & Culture Fit');
     } else {
-      setTitle('Project Deep-Dive: AI Resume Analyzer & MERN Projects');
+      setTitle('Project Deep-Dive: AI Career Platform & MERN Projects');
     }
   };
 

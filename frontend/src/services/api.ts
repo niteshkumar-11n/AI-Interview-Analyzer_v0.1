@@ -38,6 +38,10 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     ...(options.headers as Record<string, string>),
   };
 
+  if (options.body instanceof FormData) {
+    delete headers['Content-Type'];
+  }
+
   if (ghSession) {
     headers['x-github-session'] = ghSession;
   }
@@ -125,6 +129,69 @@ export const api = {
         method: 'PUT',
         body: JSON.stringify(profileData),
       }),
+
+    saveOnboardingStep: (payload: {
+      step: number;
+      careerStatus?: string;
+      data?: Partial<UserProfile> & { completeNow?: boolean };
+    }) =>
+      request<{ success: boolean; message: string; profile: UserProfile }>('/api/profile/onboarding/step', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+
+    skipOnboarding: () =>
+      request<{ success: boolean; message: string; profile: UserProfile }>('/api/profile/onboarding/skip', {
+        method: 'POST',
+      }),
+  },
+
+  resume: {
+    upload: (payload: FormData | { resumeText: string; fileName?: string }) => {
+      const isFormData = payload instanceof FormData;
+      return request<{
+        success: boolean;
+        message: string;
+        data: {
+          resumeId: string;
+          extractedFacts: any;
+          profileDiff: {
+            newSkills: string[];
+            existingSkills: string[];
+            education: { current: string; extracted: string; hasConflict: boolean };
+            experience: { current: string; extracted: string; hasConflict: boolean };
+            targetRole: { current: string; extracted: string; hasConflict: boolean };
+            projects: any[];
+            certifications: any[];
+            extractedSummary: string;
+          };
+        };
+      }>('/api/resume/upload', {
+        method: 'POST',
+        body: isFormData ? payload : JSON.stringify(payload),
+      });
+    },
+
+    confirm: (payload: { resumeId: string; confirmedFacts: any }) =>
+      request<{ success: boolean; message: string; data: any }>('/api/resume/confirm', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+
+    getStatus: () =>
+      request<{ success: boolean; data: any }>('/api/resume/status'),
+
+    getContext: (feature?: string) =>
+      request<{ success: boolean; data: any }>(
+        feature ? `/api/candidate/context?feature=${encodeURIComponent(feature)}` : '/api/candidate/context'
+      ),
+  },
+
+  candidate: {
+    getContext: (feature?: string) =>
+      request<{ success: boolean; data: any }>(
+        feature ? `/api/candidate/context?feature=${encodeURIComponent(feature)}` : '/api/candidate/context'
+      ),
   },
 
   dashboard: {
@@ -327,6 +394,56 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(params),
       }),
+
+    generateAssessment: () =>
+      request<{
+        success: boolean;
+        assessmentId: string;
+        questions: any[];
+      }>('/api/coding/assessment/generate', {
+        method: 'POST',
+      }),
+
+    evaluateAssessmentQuestion: (params: {
+      assessmentId: string;
+      questionId: string;
+      languageId: number;
+      languageName: string;
+      sourceCode: string;
+    }) =>
+      request<{
+        success: boolean;
+        result: any;
+      }>('/api/coding/assessment/evaluate-question', {
+        method: 'POST',
+        body: JSON.stringify(params),
+      }),
+
+    submitAssessment: (params: {
+      assessmentId: string;
+      questions: any[];
+      durationMinutes?: number;
+    }) =>
+      request<{
+        success: boolean;
+        message: string;
+        assessment: any;
+      }>('/api/coding/assessment/submit', {
+        method: 'POST',
+        body: JSON.stringify(params),
+      }),
+
+    getAssessmentHistory: () =>
+      request<{
+        success: boolean;
+        history: any[];
+      }>('/api/coding/assessment/history'),
+
+    getAssessmentById: (id: string) =>
+      request<{
+        success: boolean;
+        assessment: any;
+      }>(`/api/coding/assessment/${id}`),
   },
 
   github: {

@@ -12,6 +12,9 @@ export interface CandidateContext {
   userId: string;
   email: string;
   credits: number;
+  hasResume: boolean;
+  targetRole: string;
+  skills: { name: string; percentage: number; level: string }[];
   profile: {
     careerStatus: CareerStatus;
     name: string;
@@ -127,14 +130,19 @@ export class CandidateContextService {
       }
     }
 
+    const targetRole = user.profile?.targetRole || 'Full Stack Engineer';
+
     const context: CandidateContext = {
       userId: user.id,
       email: user.email,
       credits: user.credits ?? 100,
+      hasResume: Boolean(latestResume && latestResume.isConfirmed),
+      targetRole,
+      skills: skillsList,
       profile: {
         careerStatus,
         name: user.profile?.name || user.email.split('@')[0],
-        targetRole: user.profile?.targetRole || 'Full Stack Engineer',
+        targetRole,
         education: {
           degree: user.profile?.degree || 'Bachelor of Technology',
           specialization: user.profile?.specialization || 'Computer Science',
@@ -180,17 +188,61 @@ export class CandidateContextService {
   }
 
   /**
-   * Helper for technical interview engine: returns tailored skill and role context
+   * Helper for interview engine: returns tailored resume facts, projects, experience, and past questions
    */
   public static async getContextForInterview(userId: string) {
+    const user = await findUserById(userId);
     const ctx = await this.getCandidateContext(userId);
     if (!ctx) return null;
+
+    const latestResume = await getLatestUserResume(userId);
+    const interviews = await getUserInterviews(userId);
+
+    // Extract projects from resume
+    const rawProjects = latestResume?.confirmedFacts?.projects || latestResume?.extractedFacts?.projects || [];
+    const projects = Array.isArray(rawProjects)
+      ? rawProjects.map((p: any) => ({
+          title: p.title || 'Project',
+          description: p.description || '',
+          technologies: Array.isArray(p.technologies) ? p.technologies : []
+        }))
+      : [];
+
+    // Extract work experience from resume or profile
+    const rawExp = latestResume?.confirmedFacts?.experience || latestResume?.extractedFacts?.experience || (user?.profile?.workExperience as any) || [];
+    const workExperience = Array.isArray(rawExp)
+      ? rawExp.map((e: any) => ({
+          company: e.company || '',
+          role: e.role || '',
+          duration: e.duration || e.period || '',
+          description: e.description || ''
+        }))
+      : [];
+
+    // Extract summary/bio
+    const summary = latestResume?.confirmedFacts?.summary || latestResume?.extractedFacts?.summary || user?.profile?.bio || '';
+
+    // Collect all previous questions asked to this candidate to prevent repetitions
+    const previousQuestions: string[] = [];
+    interviews.forEach((inv) => {
+      if (Array.isArray(inv.questions)) {
+        inv.questions.forEach((q) => {
+          if (q.question && typeof q.question === 'string') {
+            previousQuestions.push(q.question.trim());
+          }
+        });
+      }
+    });
 
     return {
       candidateName: ctx.profile.name,
       careerStatus: ctx.profile.careerStatus,
       targetRole: ctx.profile.targetRole,
       skills: ctx.profile.skills.map((s) => s.name),
+      projects,
+      workExperience,
+      summary,
+      previousQuestions,
       weakAreas: ctx.assessmentSummary.skillGaps,
       interviewsCompleted: ctx.assessmentSummary.interviewsCompleted
     };
@@ -208,6 +260,44 @@ export class CandidateContextService {
       targetRole: ctx.profile.targetRole,
       location: ctx.profile.experience.preferredLocation || 'India',
       yearsOfExperience: ctx.profile.experience.yearsOfExperience || '0'
+    };
+  }
+
+  /**
+   * Helper for coding practice: returns tailored skill and programming language preferences
+   */
+  public static async getContextForCoding(userId: string) {
+    const ctx = await this.getCandidateContext(userId);
+    if (!ctx) return null;
+
+    const skillNames = ctx.profile.skills.map((s) => s.name);
+    const preferredLang = skillNames.find((s) =>
+      ['JavaScript', 'TypeScript', 'Python', 'Java', 'C++', 'Go'].includes(s)
+    ) || 'JavaScript';
+
+    return {
+      candidateName: ctx.profile.name,
+      targetRole: ctx.profile.targetRole,
+      skills: skillNames,
+      technicalSkills: skillNames,
+      preferredLanguage: preferredLang,
+      experienceLevel: ctx.profile.careerStatus === 'student' || ctx.profile.careerStatus === 'fresher' ? 'Entry' : 'Experienced'
+    };
+  }
+
+  /**
+   * Helper for GitHub and open-source matching: returns verified skills and repository languages
+   */
+  public static async getContextForGitHub(userId: string) {
+    const ctx = await this.getCandidateContext(userId);
+    if (!ctx) return null;
+
+    return {
+      candidateName: ctx.profile.name,
+      targetRole: ctx.profile.targetRole,
+      skills: ctx.profile.skills.map((s) => s.name),
+      githubUrl: ctx.profile.links.githubUrl,
+      careerStatus: ctx.profile.careerStatus
     };
   }
 }

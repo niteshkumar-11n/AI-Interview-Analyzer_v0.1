@@ -24,8 +24,11 @@ import {
   Sliders, 
   ChevronDown,
   Check,
-  FolderKanban
+  FolderKanban,
+  FileText,
+  UploadCloud
 } from 'lucide-react';
+import { ResumeUploadModal } from '../../components/profile/ResumeUploadModal.tsx';
 
 const DEFAULT_AVATAR = 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=400&auto=format&fit=crop&q=80';
 
@@ -80,6 +83,21 @@ export const ProfileView: React.FC = () => {
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
   const [isEditingLinks, setIsEditingLinks] = useState(false);
   const [photoModalOpen, setPhotoModalOpen] = useState(false);
+  const [resumeModalOpen, setResumeModalOpen] = useState(false);
+  const [resumeStatus, setResumeStatus] = useState<any>(null);
+
+  const loadResumeStatus = async () => {
+    try {
+      const res = await api.resume.getStatus();
+      setResumeStatus(res);
+    } catch {
+      // Resume status optional
+    }
+  };
+
+  useEffect(() => {
+    loadResumeStatus();
+  }, []);
 
   // Sync initial user data
   useEffect(() => {
@@ -866,6 +884,78 @@ export const ProfileView: React.FC = () => {
               </div>
             </div>
 
+            {/* Resume Profile Enrichment Card */}
+            <div className="card border bg-white rounded-4 shadow-sm" id="section-resume">
+              <div className="card-body p-4">
+                <div className="d-flex align-items-center justify-content-between mb-2">
+                  <div className="d-flex align-items-center gap-2">
+                    <div 
+                      className="rounded-2 d-flex align-items-center justify-content-center text-primary"
+                      style={{ width: '28px', height: '28px', backgroundColor: '#EFF6FF' }}
+                    >
+                      <FileText size={16} />
+                    </div>
+                    <h2 className="fs-6 fw-bold text-dark mb-0">Resume Enrichment</h2>
+                  </div>
+                  {resumeStatus?.hasResume && (
+                    <span className="badge bg-emerald-50 text-success border border-emerald-200 px-2.5 py-1 rounded-pill small">
+                      v{resumeStatus.resume?.version || 1} • Confirmed
+                    </span>
+                  )}
+                </div>
+                <p className="text-secondary small mb-3 ps-4 ms-1" style={{ fontSize: '0.8rem' }}>
+                  Optional resume facts synced to your candidate profile
+                </p>
+
+                {resumeStatus?.hasResume ? (
+                  <div className="p-3 bg-light rounded-3 border mb-3">
+                    <div className="d-flex align-items-center justify-content-between mb-2">
+                      <div className="d-flex align-items-center gap-2 text-truncate">
+                        <FileText size={16} className="text-primary flex-shrink-0" />
+                        <span className="small fw-semibold text-dark text-truncate">
+                          {resumeStatus.resume?.originalName || 'Candidate Resume'}
+                        </span>
+                      </div>
+                      <span className="badge bg-white text-secondary border small">
+                        {resumeStatus.resume?.mimeType === 'application/pdf' ? 'PDF' : 'DOCX/TXT'}
+                      </span>
+                    </div>
+                    {resumeStatus.resume?.extractedFacts?.skills?.length > 0 && (
+                      <div className="small text-secondary mb-2">
+                        <span className="fw-medium text-dark">{resumeStatus.resume.extractedFacts.skills.length}</span> skills extracted
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setResumeModalOpen(true)}
+                      className="btn btn-outline-primary btn-sm w-100 rounded-3 d-flex align-items-center justify-content-center gap-2 py-1.5 fw-semibold"
+                    >
+                      <UploadCloud size={14} />
+                      <span>Replace / Re-upload Resume</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-light rounded-3 border mb-3 text-center">
+                    <p className="small text-secondary mb-3">
+                      No resume uploaded yet. Enhance your candidate profile by optionally uploading your CV (PDF, DOCX, TXT).
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setResumeModalOpen(true)}
+                      className="btn btn-primary btn-sm w-100 rounded-3 d-flex align-items-center justify-content-center gap-2 py-2 fw-semibold"
+                      style={{ backgroundColor: '#2563EB', borderColor: '#2563EB' }}
+                    >
+                      <UploadCloud size={15} />
+                      <span>Upload Resume (Optional)</span>
+                    </button>
+                    <div className="small text-muted mt-2" style={{ fontSize: '0.75rem' }}>
+                      Resume is optional. All features work without it.
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
             {/* 2. Your Skills Card */}
             <div className="card border bg-white rounded-4 shadow-sm" id="section-skills">
               <div className="card-body p-4">
@@ -1073,6 +1163,17 @@ export const ProfileView: React.FC = () => {
           </div>
         </div>
       </div>
+
+      <ResumeUploadModal
+        isOpen={resumeModalOpen}
+        onClose={() => setResumeModalOpen(false)}
+        onSuccess={(updatedRecord) => {
+          loadResumeStatus();
+          if (updatedRecord?.profile) {
+            updateProfileState(updatedRecord.profile);
+          }
+        }}
+      />
     </div>
   );
 };

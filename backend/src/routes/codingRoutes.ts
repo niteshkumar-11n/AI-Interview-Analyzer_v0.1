@@ -22,6 +22,12 @@ import {
   getProblemsForClient,
   CodingSubmissionModel,
 } from '../models/CodingProblem.ts';
+import {
+  CodingAssessmentService,
+} from '../services/coding/codingAssessmentService.ts';
+import {
+  CodingAssessmentModel,
+} from '../models/CodingAssessment.ts';
 
 const router = Router();
 
@@ -248,6 +254,164 @@ router.post('/submit', authMiddleware, async (req: AuthenticatedRequest, res: Re
     return res.status(500).json({
       success: false,
       message: 'Failed to submit solution. Please try again.',
+    });
+  }
+});
+
+/* ─────────────────────────────────
+   POST /api/coding/assessment/generate
+   Generates 4 assessment questions (Easy 10m, Med 20m, Med-Hard 30m, Star Challenge 40m)
+   Hidden test cases are stripped from the response
+   ───────────────────────────────── */
+router.post('/assessment/generate', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await CodingAssessmentService.generateAssessment(req.user?.id);
+    return res.json({
+      success: true,
+      assessmentId: result.assessmentId,
+      questions: result.questions,
+    });
+  } catch (err: any) {
+    console.error('[Coding] Assessment generate error:', err.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to generate coding assessment questions. ' + err.message,
+    });
+  }
+});
+
+/* ─────────────────────────────────
+   POST /api/coding/assessment/evaluate-question
+   Authoritative evaluation of single question against all test cases (visible + hidden)
+   Calculates correctness score and triggers AI code review
+   ───────────────────────────────── */
+router.post('/assessment/evaluate-question', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { assessmentId, questionId, languageId, languageName, sourceCode } = req.body;
+
+    if (!assessmentId || !questionId) {
+      return res.status(400).json({ success: false, message: 'assessmentId and questionId are required.' });
+    }
+    if (!languageId || typeof languageId !== 'number') {
+      return res.status(400).json({ success: false, message: 'A valid languageId is required.' });
+    }
+    if (!sourceCode || typeof sourceCode !== 'string' || sourceCode.trim().length === 0) {
+      return res.status(400).json({ success: false, message: 'Source code is required.' });
+    }
+
+    const evaluation = await CodingAssessmentService.evaluateQuestion({
+      assessmentId,
+      questionId,
+      languageId,
+      languageName: languageName || 'Python',
+      sourceCode: sourceCode.trim(),
+    });
+
+    return res.json({
+      success: true,
+      result: evaluation,
+    });
+  } catch (err: any) {
+    console.error('[Coding] Assessment question evaluation error:', err.message);
+    return res.status(500).json({
+      success: false,
+      message: err.message || 'Failed to evaluate question.',
+    });
+  }
+});
+
+/* ─────────────────────────────────
+   POST /api/coding/assessment/submit
+   Finalizes assessment, persists to MongoDB, updates dashboard activity
+   ───────────────────────────────── */
+router.post('/assessment/submit', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { assessmentId, questions, durationMinutes } = req.body;
+
+    if (!assessmentId || !Array.isArray(questions)) {
+      return res.status(400).json({ success: false, message: 'assessmentId and questions array are required.' });
+    }
+
+    if (!req.user?.id) {
+      return res.status(401).json({ success: false, message: 'Authentication required to submit assessment.' });
+    }
+
+    const savedAssessment = await CodingAssessmentService.submitAssessment({
+      userId: req.user.id,
+      assessmentId,
+      questions,
+      durationMinutes: Number(durationMinutes) || 45,
+    });
+
+    return res.json({
+      success: true,
+      message: 'Coding assessment submitted and recorded successfully!',
+      assessment: savedAssessment,
+    });
+  } catch (err: any) {
+    console.error('[Coding] Assessment submit error:', err.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to record coding assessment. ' + err.message,
+    });
+  }
+});
+
+/* ─────────────────────────────────
+   GET /api/coding/assessment/history
+   Returns authenticated user's completed coding assessment history
+   ───────────────────────────────── */
+router.get('/assessment/history', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user?.id) {
+      return res.status(401).json({ success: false, message: 'Authentication required.' });
+    }
+
+    const history = await CodingAssessmentModel.find({ userId: req.user.id })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return res.json({
+      success: true,
+      history,
+    });
+  } catch (err: any) {
+    console.error('[Coding] Assessment history error:', err.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch assessment history.',
+    });
+  }
+});
+
+/* ─────────────────────────────────
+   GET /api/coding/assessment/:id
+   Returns a single completed coding assessment with scorecard
+   ───────────────────────────────── */
+router.get('/assessment/:id', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user?.id) {
+      return res.status(401).json({ success: false, message: 'Authentication required.' });
+    }
+
+    const assessment = await CodingAssessmentModel.findOne({
+      userId: req.user.id,
+      $or: [{ assessmentId: req.params.id }, { _id: req.params.id }],
+    }).lean();
+
+    if (!assessment) {
+      return res.status(404).json({ success: false, message: 'Assessment record not found.' });
+    }
+
+    return res.json({
+      success: true,
+      assessment,
+    });
+  } catch (err: any) {
+    console.error('[Coding] Assessment fetch error:', err.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch assessment.',
     });
   }
 });

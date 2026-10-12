@@ -5,7 +5,7 @@
  */
 import mongoose, { Schema, Document } from 'mongoose';
 
-export type ResumeProcessingStatus = 'pending' | 'completed' | 'failed';
+export type ResumeProcessingStatus = 'uploaded' | 'processing' | 'completed' | 'failed' | 'pending';
 
 export interface ExtractedCandidateFacts {
   name?: string;
@@ -25,6 +25,16 @@ export interface ExtractedCandidateFacts {
     duration?: string;
     description?: string;
   }[];
+  projects?: {
+    title: string;
+    description?: string;
+    technologies?: string[];
+  }[];
+  certifications?: {
+    name: string;
+    issuer?: string;
+    year?: number;
+  }[];
   summary?: string;
 }
 
@@ -38,6 +48,7 @@ export interface IResumeDocument extends Document {
   errorMessage?: string;
   extractedFacts?: ExtractedCandidateFacts;
   confirmedFacts?: Partial<ExtractedCandidateFacts>;
+  replacedFromId?: string;
   isConfirmed: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -50,6 +61,7 @@ export interface ResumeRecord {
   fileSize: number;
   mimeType: string;
   version: number;
+  replacedFromId?: string;
   processingStatus: ResumeProcessingStatus;
   errorMessage?: string;
   extractedFacts?: ExtractedCandidateFacts;
@@ -66,6 +78,9 @@ const ResumeSchema = new Schema<IResumeDocument>(
       ref: 'User',
       required: true,
       index: true
+    },
+    replacedFromId: {
+      type: String
     },
     fileName: {
       type: String,
@@ -85,8 +100,8 @@ const ResumeSchema = new Schema<IResumeDocument>(
     },
     processingStatus: {
       type: String,
-      enum: ['pending', 'completed', 'failed'],
-      default: 'pending',
+      enum: ['uploaded', 'processing', 'completed', 'failed', 'pending'],
+      default: 'uploaded',
       index: true
     },
     errorMessage: {
@@ -153,7 +168,9 @@ export async function createResumeRecord(data: {
   processingStatus?: ResumeProcessingStatus;
   errorMessage?: string;
 }): Promise<ResumeRecord> {
-  const version = await getNextResumeVersion(data.userId);
+  const previous = await getLatestUserResume(data.userId);
+  const version = previous ? previous.version + 1 : 1;
+  const replacedFromId = previous ? previous.id : undefined;
 
   if (isMongoConnected() && mongoose.isValidObjectId(data.userId)) {
     try {
@@ -163,6 +180,7 @@ export async function createResumeRecord(data: {
         fileSize: data.fileSize,
         mimeType: data.mimeType,
         version,
+        replacedFromId,
         processingStatus: data.processingStatus || 'completed',
         extractedFacts: data.extractedFacts,
         errorMessage: data.errorMessage,
@@ -176,6 +194,7 @@ export async function createResumeRecord(data: {
         fileSize: doc.fileSize,
         mimeType: doc.mimeType,
         version: doc.version,
+        replacedFromId: doc.replacedFromId,
         processingStatus: doc.processingStatus,
         errorMessage: doc.errorMessage,
         extractedFacts: doc.extractedFacts,
@@ -196,6 +215,7 @@ export async function createResumeRecord(data: {
     fileSize: data.fileSize,
     mimeType: data.mimeType,
     version,
+    replacedFromId,
     processingStatus: data.processingStatus || 'completed',
     errorMessage: data.errorMessage,
     extractedFacts: data.extractedFacts,
@@ -225,6 +245,7 @@ export async function getLatestUserResume(userId: string): Promise<ResumeRecord 
           fileSize: doc.fileSize,
           mimeType: doc.mimeType,
           version: doc.version,
+          replacedFromId: doc.replacedFromId,
           processingStatus: doc.processingStatus,
           errorMessage: doc.errorMessage,
           extractedFacts: doc.extractedFacts,
@@ -310,4 +331,38 @@ async function getNextResumeVersion(userId: string): Promise<number> {
   }
   const list = memoryResumes.get(userId) || [];
   return list.length > 0 ? list[0].version + 1 : 1;
+}
+
+/**
+ * Retrieves a specific resume by ID with authenticated user verification
+ */
+export async function getResumeById(resumeId: string, userId: string): Promise<ResumeRecord | null> {
+  if (isMongoConnected() && mongoose.isValidObjectId(resumeId)) {
+    try {
+      const doc = await ResumeModel.findOne({ _id: resumeId, userId });
+      if (doc) {
+        return {
+          id: doc._id.toString(),
+          userId: doc.userId.toString(),
+          fileName: doc.fileName,
+          fileSize: doc.fileSize,
+          mimeType: doc.mimeType,
+          version: doc.version,
+          processingStatus: doc.processingStatus,
+          errorMessage: doc.errorMessage,
+          extractedFacts: doc.extractedFacts,
+          confirmedFacts: doc.confirmedFacts,
+          isConfirmed: doc.isConfirmed,
+          createdAt: doc.createdAt.toISOString(),
+          updatedAt: doc.updatedAt.toISOString()
+        };
+      }
+    } catch (err: any) {
+      console.warn('[DB] Error querying resume by ID:', err.message);
+    }
+  }
+
+  const list = memoryResumes.get(userId) || [];
+  const found = list.find((r) => r.id === resumeId && r.userId === userId);
+  return found || null;
 }

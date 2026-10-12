@@ -9,15 +9,12 @@ import {
   User, 
   Settings, 
   Star,
-  Crown,
-  Check,
   ChevronRight,
   X,
   Link2,
   Headphones,
-  Flame,
-  Gauge,
   BarChart2,
+  GraduationCap
 } from 'lucide-react';
 
 export type NavItemKey = 
@@ -26,7 +23,7 @@ export type NavItemKey =
   | 'job-recommendations'
   | 'ai-interview'
   | 'coding-interview' 
-  | 'interview-readiness'
+  | 'interview-readiness' 
   | 'github' 
   | 'interview-history' 
   | 'profile' 
@@ -39,7 +36,7 @@ export type ViewType =
   | 'job-recommendations' 
   | 'ai-interview' 
   | 'coding-interview' 
-  | 'interview-readiness'
+  | 'interview-readiness' 
   | 'github'
   | 'analytics';
 
@@ -136,17 +133,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   style={{
                     width: '34px',
                     height: '34px',
-                    background: 'linear-gradient(135deg, #2563EB 0%, #7C3AED 100%)'
+                    background: 'linear-gradient(135deg, #00B69B 0%, #0D7A5F 100%)'
                   }}
                 >
-                  <Sparkles size={18} className="text-white" />
+                  <GraduationCap size={20} className="text-white" />
                 </div>
                 <div>
                   <span className="fw-bold fs-6 tracking-tight text-white d-block lh-sm">
-                    CareerCraft AI
+                    SkillNexus
                   </span>
                   <span className="text-secondary" style={{ fontSize: '0.66rem', letterSpacing: '0.02em' }}>
-                    Practice. Improve. Get Hired.
+                    Ace Interviews &amp; Skills
                   </span>
                 </div>
               </div>
@@ -217,85 +214,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
               })}
             </nav>
           </div>
-
-          {/* Bottom Card: "Keep Going!" when in coding-interview, or "Upgrade to Pro" */}
-          <div className="p-3 border-top" style={{ borderColor: 'rgba(255, 255, 255, 0.08)' }}>
-            {currentView === 'coding-interview' ? (
-              <div 
-                className="rounded-3 p-3 text-start position-relative overflow-hidden"
-                style={{
-                  backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                  border: '1px solid rgba(255, 255, 255, 0.08)'
-                }}
-              >
-                <div className="d-flex align-items-center gap-2 mb-1.5">
-                  <div 
-                    className="rounded-circle d-flex align-items-center justify-content-center"
-                    style={{ width: '24px', height: '24px', backgroundColor: 'rgba(249, 115, 22, 0.18)', color: '#F97316' }}
-                  >
-                    <Flame size={15} fill="#F97316" />
-                  </div>
-                  <span className="fw-bold text-white small" style={{ fontSize: '0.84rem' }}>
-                    Keep Going!
-                  </span>
-                </div>
-                <p className="small mb-0" style={{ fontSize: '0.74rem', lineHeight: '1.4', color: 'rgba(255, 255, 255, 0.65)' }}>
-                  Solve 5 more problems this week to reach your goal.
-                </p>
-              </div>
-            ) : (
-              <div 
-                className="rounded-3 p-3 text-start position-relative overflow-hidden"
-                style={{
-                  backgroundColor: 'rgba(255, 255, 255, 0.04)',
-                  border: '1px solid rgba(255, 255, 255, 0.08)'
-                }}
-              >
-                <div className="d-flex align-items-center gap-2 mb-2">
-                  <div 
-                    className="rounded-circle d-flex align-items-center justify-content-center"
-                    style={{ width: '22px', height: '22px', backgroundColor: 'rgba(245, 158, 11, 0.15)', color: '#F59E0B' }}
-                  >
-                    <Crown size={14} fill="#F59E0B" />
-                  </div>
-                  <span className="fw-bold text-white small" style={{ fontSize: '0.84rem' }}>
-                    Upgrade to Pro
-                  </span>
-                </div>
-                <div className="d-flex flex-column gap-1 mb-2.5">
-                  <div className="d-flex align-items-center gap-1.5" style={{ fontSize: '0.74rem', color: 'rgba(255, 255, 255, 0.75)' }}>
-                    <Check size={13} className="text-success flex-shrink-0" />
-                    <span>Advanced analytics</span>
-                  </div>
-                  <div className="d-flex align-items-center gap-1.5" style={{ fontSize: '0.74rem', color: 'rgba(255, 255, 255, 0.75)' }}>
-                    <Check size={13} className="text-success flex-shrink-0" />
-                    <span>Detailed performance insights</span>
-                  </div>
-                  <div className="d-flex align-items-center gap-1.5" style={{ fontSize: '0.74rem', color: 'rgba(255, 255, 255, 0.75)' }}>
-                    <Check size={13} className="text-success flex-shrink-0" />
-                    <span>Personalized learning plan</span>
-                  </div>
-                  <div className="d-flex align-items-center gap-1.5" style={{ fontSize: '0.74rem', color: 'rgba(255, 255, 255, 0.75)' }}>
-                    <Check size={13} className="text-success flex-shrink-0" />
-                    <span>Export reports</span>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => onOpenModal('settings')}
-                  className="btn btn-sm w-100 rounded-2 fw-semibold text-white transition-all shadow-xs border-0"
-                  style={{
-                    backgroundColor: '#2563EB',
-                    fontSize: '0.78rem',
-                    padding: '6px 10px'
-                  }}
-                >
-                  Upgrade Now
-                </button>
-              </div>
-            )}
-          </div>
-
         </div>
       </aside>
     </>

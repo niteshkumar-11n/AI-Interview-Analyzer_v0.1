@@ -7,7 +7,8 @@ import { Response } from 'express';
 import { AuthenticatedRequest } from '../middleware/authMiddleware.ts';
 import { ResumeEnrichmentService } from '../services/resume/resumeEnrichmentService.ts';
 import { CandidateContextService } from '../services/candidate/candidateContextService.ts';
-import { getLatestUserResume } from '../models/Resume.ts';
+import { getLatestUserResume, getResumeById } from '../models/Resume.ts';
+import { validateResumeFile, extractTextFromBuffer } from '../utils/textExtractor.ts';
 
 /**
  * POST /api/resume/upload
@@ -25,31 +26,52 @@ export async function uploadResume(req: AuthenticatedRequest, res: Response) {
     let mimeType = 'text/plain';
     let rawText = '';
 
-    if (req.file) {
-      fileName = req.file.originalname;
-      fileSize = req.file.size;
-      mimeType = req.file.mimetype;
-      // Convert buffer to UTF-8 text (or extracted plain string)
-      rawText = req.file.buffer.toString('utf-8');
+    const uploadedFile = req.file || (req.files && (req.files as any)['file']?.[0]) || (req.files && (req.files as any)['resume']?.[0]);
+
+    if (uploadedFile) {
+      fileName = uploadedFile.originalname;
+      fileSize = uploadedFile.size;
+      mimeType = uploadedFile.mimetype;
+
+      // Validate file type and size
+      const validation = validateResumeFile(fileName, fileSize, mimeType);
+      if (!validation.valid) {
+        return res.status(400).json({
+          success: false,
+          message: validation.error,
+          error: validation.error
+        });
+      }
+
+      // Extract text safely from buffer
+      const extracted = extractTextFromBuffer(uploadedFile.buffer, fileName, mimeType);
+      rawText = extracted.text;
     } else if (req.body.resumeText) {
       rawText = String(req.body.resumeText).trim();
       fileName = req.body.fileName || 'resume_pasted.txt';
       fileSize = Buffer.byteLength(rawText, 'utf-8');
       mimeType = 'text/plain';
-    }
 
-    if (!rawText || rawText.length < 15) {
+      if (fileSize > 5 * 1024 * 1024) {
+        return res.status(400).json({
+          success: false,
+          message: 'Resume text exceeds maximum limit of 5MB.',
+          error: 'Resume text exceeds maximum limit of 5MB.'
+        });
+      }
+    } else {
       return res.status(400).json({
         success: false,
-        message: 'No readable resume content provided. Please upload a valid document or paste text.'
+        message: 'No file or resume text provided.',
+        error: 'No file or resume text provided.'
       });
     }
 
-    // Size limit check: 5MB max
-    if (fileSize > 5 * 1024 * 1024) {
+    if (!rawText || rawText.trim().length < 15) {
       return res.status(400).json({
         success: false,
-        message: 'File size exceeds maximum limit of 5MB.'
+        message: 'Could not extract readable text from document. Please ensure the file is not empty or corrupted, or paste your resume text.',
+        error: 'Could not extract readable text from document.'
       });
     }
 
@@ -64,19 +86,21 @@ export async function uploadResume(req: AuthenticatedRequest, res: Response) {
     return res.json({
       success: true,
       message: 'Resume analyzed successfully for profile enrichment (No ATS scoring).',
-      data: result
+      data: result,
+      ...result
     });
   } catch (err: any) {
     console.error('uploadResume error:', err);
     return res.status(500).json({
       success: false,
-      message: err.message || 'Failed to process resume for profile enrichment.'
+      message: err.message || 'Failed to process resume for profile enrichment.',
+      error: err.message
     });
   }
 }
 
 /**
- * POST /api/resume/confirm
+ * POST /api/resume/confirm or POST /api/resume/:id/confirm
  * Reviews, edits, and confirms extracted candidate facts to merge into profile
  */
 export async function confirmResume(req: AuthenticatedRequest, res: Response) {
@@ -85,9 +109,21 @@ export async function confirmResume(req: AuthenticatedRequest, res: Response) {
       return res.status(401).json({ success: false, message: 'Authentication required.' });
     }
 
-    const { resumeId, confirmedFacts } = req.body;
+    const resumeId = req.params.id || req.body.resumeId;
     if (!resumeId) {
       return res.status(400).json({ success: false, message: 'resumeId is required.' });
+    }
+
+    const confirmedFacts = req.body.confirmedFacts || req.body;
+
+    // Authenticated ownership check: verify resume belongs to requesting user
+    const existingResume = await getResumeById(resumeId, req.user.id);
+    if (!existingResume) {
+      return res.status(404).json({
+        success: false,
+        message: 'Resume record not found or access unauthorized.',
+        error: 'Resume record not found or access unauthorized.'
+      });
     }
 
     const result = await ResumeEnrichmentService.confirmAndMerge(
@@ -99,13 +135,15 @@ export async function confirmResume(req: AuthenticatedRequest, res: Response) {
     return res.json({
       success: true,
       message: 'Candidate facts confirmed and profile enriched successfully!',
-      data: result
+      data: result,
+      ...result
     });
   } catch (err: any) {
     console.error('confirmResume error:', err);
     return res.status(500).json({
       success: false,
-      message: err.message || 'Failed to confirm resume facts.'
+      message: err.message || 'Failed to confirm resume facts.',
+      error: err.message
     });
   }
 }
@@ -123,7 +161,12 @@ export async function getResumeStatus(req: AuthenticatedRequest, res: Response) 
     const latest = await getLatestUserResume(req.user.id);
     return res.json({
       success: true,
-      data: latest
+      hasResume: Boolean(latest),
+      resume: latest,
+      data: {
+        hasResume: Boolean(latest),
+        resume: latest
+      }
     });
   } catch (err: any) {
     console.error('getResumeStatus error:', err);
@@ -141,14 +184,29 @@ export async function getCandidateContext(req: AuthenticatedRequest, res: Respon
       return res.status(401).json({ success: false, message: 'Authentication required.' });
     }
 
-    const context = await CandidateContextService.getCandidateContext(req.user.id);
-    if (!context) {
+    const feature = String(req.query.feature || '').toLowerCase();
+    let data: any;
+
+    if (feature === 'interview') {
+      data = await CandidateContextService.getContextForInterview(req.user.id);
+    } else if (feature === 'jobs') {
+      data = await CandidateContextService.getContextForJobs(req.user.id);
+    } else if (feature === 'coding') {
+      data = await CandidateContextService.getContextForCoding(req.user.id);
+    } else if (feature === 'github') {
+      data = await CandidateContextService.getContextForGitHub(req.user.id);
+    } else {
+      data = await CandidateContextService.getCandidateContext(req.user.id);
+    }
+
+    if (!data) {
       return res.status(404).json({ success: false, message: 'Candidate context not found.' });
     }
 
     return res.json({
       success: true,
-      data: context
+      data,
+      context: data
     });
   } catch (err: any) {
     console.error('getCandidateContext error:', err);

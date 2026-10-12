@@ -138,8 +138,8 @@ export let activities: Activity[] = [
   },
   {
     id: 'act_2',
-    title: 'Analyzed Resume',
-    subtitle: 'Updated ATS score to 86%',
+    title: 'Enriched Candidate Profile',
+    subtitle: 'Extracted skills & experience from resume',
     timeAgo: '1 day ago',
     type: 'resume'
   },

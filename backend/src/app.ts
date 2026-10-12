@@ -69,6 +69,7 @@ export async function createApp() {
   app.use('/api/interview', interviewRoutes);
   app.use('/api/payment', paymentRoutes);
   app.use('/api/resume', resumeRoutes);
+  app.use('/api/candidate', resumeRoutes);
 
   // In production, serve the built frontend assets
   if (process.env.NODE_ENV === 'production') {

@@ -8,21 +8,41 @@ export interface SkillItem {
   category?: SkillCategory;
 }
 
+export type CareerStatus = 'student' | 'fresher' | 'working' | 'career_switcher';
+
+export interface OnboardingStatus {
+  isCompleted: boolean;
+  step: number; // 1: career-status, 2: conditional-details, 3: optional-resume
+  careerStatus?: CareerStatus;
+}
+
 export interface UserProfile {
   name: string;
   email?: string;
   phone?: string;
   dob?: string;
+  careerStatus?: CareerStatus;
+  onboardingStatus?: OnboardingStatus;
   education: string;
   degree?: string;
   branch?: string;
+  specialization?: string;
   college: string;
+  academicYear?: string;
   graduationYear: number;
   experience?: string;
   experienceLevel?: string;
   yearsOfExperience?: string;
   currentCompany?: string;
   currentPosition?: string;
+  currentJobTitle?: string;
+  workHistory?: { company: string; role: string; period: string; description: string }[];
+  preferredLocation?: string;
+  workMode?: 'Remote' | 'Hybrid' | 'On-site';
+  previousBackground?: string;
+  relevantExperience?: string;
+  desiredCareerPath?: string;
+  learningGoals?: string;
   targetRole: string;
   targetCompany?: string;
   targetJobDescription?: string;
@@ -30,6 +50,9 @@ export interface UserProfile {
   github: string;
   linkedin: string;
   portfolio: string;
+  githubUrl?: string;
+  linkedinUrl?: string;
+  portfolioUrl?: string;
   bio?: string;
   location?: string;
   photoUrl?: string;
@@ -116,27 +139,60 @@ export interface UserActivity {
 export interface DashboardData {
   interviewReadiness: {
     overallScore: number;
-    readinessLevel: 'Interview Ready' | 'Near Ready' | 'Needs Practice' | 'Early Stage';
-    breakdown: {
+    readinessLevel?: 'Interview Ready' | 'Near Ready' | 'Needs Practice' | 'Early Stage' | string;
+    status?: string;
+    description?: string;
+    breakdown?: {
       technicalDepth: number;
       systemDesign: number;
       problemSolving: number;
       communication: number;
       codeEfficiency: number;
     };
-    trend: number;
+    trend?: number;
   };
-  recentInterview: InterviewScore | null;
-  interviewHistory: InterviewScore[];
-  skillsOverview: SkillItem[];
+  recentInterview: any;
+  latestTechnicalInterview?: {
+    id: string;
+    role: string;
+    title: string;
+    mode: 'Technical';
+    score: number;
+    rawScore?: number;
+    date: string;
+    technical?: number;
+    problemSolving?: number;
+    communication?: number;
+    codeQuality?: number;
+  } | null;
+  latestHrInterview?: {
+    id: string;
+    role: string;
+    title: string;
+    mode: 'HR';
+    score: number;
+    rawScore?: number;
+    date: string;
+    communication?: number;
+    behavioral?: number;
+    relevance?: number;
+    codeQuality?: number;
+  } | null;
+  latestCodingAssessment?: CodingAssessmentRecord | null;
+  codingMetrics?: CodingMetrics | null;
+  interviewHistory?: InterviewScore[];
+  skillsOverview?: SkillItem[];
+  skills?: any[];
+  stats?: any;
   skillCategoriesSummary?: { name: string; percentage: number }[];
-  weakAreas: WeakArea[];
+  weakAreas: any[];
   recommendedJobs: RecommendedJob[];
   recommendedIssues: OpenSourceIssue[];
-  recentActivities: UserActivity[];
+  recentActivities: any[];
   credits?: number;
   recentInterviewHistory?: any[];
   recentTransactions?: any[];
+  scoreHistory?: any[];
 }
 
 export interface CreditPackage {
@@ -218,9 +274,11 @@ export interface TechnicalInterviewReport {
   difficulty: string;
   mode: 'Technical' | 'HR';
   finalScore: number;
+  scoreOutOf100?: number;
   confidence: number;
   communication: number;
   correctness: number;
+  overallFeedback?: string;
   recommendedPracticeTopics: string[];
   status: string;
   createdAt: string;
@@ -241,4 +299,88 @@ export interface InterviewHistoryItem {
   status: string;
   totalQuestions: number;
   createdAt: string;
+}
+
+export interface CodingAssessmentQuestion {
+  id: string;
+  tierIndex: number;
+  tierName: 'Easy' | 'Medium' | 'Medium-Hard' | 'Star Challenge';
+  originalDifficulty: 'Easy' | 'Medium' | 'Hard';
+  marks: number;
+  title: string;
+  topic: string;
+  tags: string[];
+  description: string;
+  constraints: string[];
+  inputSpec: string;
+  outputSpec: string;
+  examples: { input: string; output: string; explanation?: string }[];
+  starterCode: Record<string, string>;
+  visibleTestCases: { stdin: string; expectedOutput: string }[];
+}
+
+export interface CodingAssessmentQuestionResult {
+  questionId: string;
+  title: string;
+  tierName: 'Easy' | 'Medium' | 'Medium-Hard' | 'Star Challenge';
+  maxMarks: number;
+  score: number;
+  passedTests: number;
+  totalTests: number;
+  status: string;
+  executionTime?: string | null;
+  memory?: number | null;
+  testResults: {
+    testCaseIndex: number;
+    passed: boolean;
+    status: { id: number; description: string };
+    stdout?: string | null;
+    stderr?: string | null;
+    compileOutput?: string | null;
+    expectedOutput?: string;
+    actualOutput?: string | null;
+    time?: string | null;
+    memory?: number | null;
+    isHidden?: boolean;
+  }[];
+  aiReview: {
+    feedback: string;
+    strengths: string[];
+    improvements: string[];
+    timeComplexity?: string;
+    spaceComplexity?: string;
+  };
+}
+
+export interface CodingAssessmentRecord {
+  id: string;
+  assessmentId?: string;
+  title: string;
+  score: number;
+  totalScore?: number;
+  easyScore: number;
+  mediumScore: number;
+  mediumHardScore: number;
+  starChallengeScore: number;
+  questionsCount?: number;
+  date: string;
+  weakAreas?: string[];
+  recommendedTopics?: string[];
+  durationMinutes?: number;
+  questions?: any[];
+  overallFeedback?: string;
+}
+
+export interface CodingMetrics {
+  totalAssessments: number;
+  latestScore: number | null;
+  highestScore: number | null;
+  averageScore: number | null;
+  difficultyPerformance: {
+    easyAvg: number;
+    mediumAvg: number;
+    mediumHardAvg: number;
+    starChallengeAvg: number;
+  };
+  history: CodingAssessmentRecord[];
 }

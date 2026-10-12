@@ -19,8 +19,14 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 } // 5MB
 });
 
-router.post('/upload', authMiddleware, upload.single('file'), uploadResume);
+const uploadMiddleware = upload.fields([
+  { name: 'file', maxCount: 1 },
+  { name: 'resume', maxCount: 1 }
+]);
+
+router.post('/upload', authMiddleware, uploadMiddleware, uploadResume);
 router.post('/confirm', authMiddleware, confirmResume);
+router.post('/:id/confirm', authMiddleware, confirmResume);
 router.get('/status', authMiddleware, getResumeStatus);
 router.get('/context', authMiddleware, getCandidateContext);
 

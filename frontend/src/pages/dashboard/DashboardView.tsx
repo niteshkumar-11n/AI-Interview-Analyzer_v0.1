@@ -15,7 +15,8 @@ import {
   Trophy, 
   ArrowRight, 
   Target,
-  PenTool
+  PenTool,
+  UserCheck
 } from 'lucide-react';
 
 import { CodingInterviewModal } from '../../components/coding/CodingInterviewModal.tsx';
@@ -24,6 +25,8 @@ import { JobsExplorerModal } from '../../components/job/JobsExplorerModal.tsx';
 import { ScorecardDetailsModal } from '../../components/interview/ScorecardDetailsModal.tsx';
 import { PracticeRoadmapModal } from '../../components/interview/PracticeRoadmapModal.tsx';
 import { OpenSourceModal } from '../../components/github/OpenSourceModal.tsx';
+import { CodingScorecardModal } from '../../components/coding/CodingScorecardModal.tsx';
+import { CodingAssessmentRecord } from '../../types.ts';
 import { Coins } from 'lucide-react';
 
 interface DashboardViewProps {
@@ -31,6 +34,7 @@ interface DashboardViewProps {
   onNavigateToProfile: () => void;
   onOpenCreditModal?: () => void;
   onNavigateToInterview?: () => void;
+  onNavigateToCoding?: () => void;
 }
 
 // Crisp Vector Logos for Companies and Repositories
@@ -108,7 +112,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenMockTest, 
   onNavigateToProfile,
   onOpenCreditModal,
-  onNavigateToInterview
+  onNavigateToInterview,
+  onNavigateToCoding
 }) => {
   const { user } = useAuth();
   const [data, setData] = useState<DashboardData | null>(null);
@@ -116,10 +121,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [error, setError] = useState<string | null>(null);
 
   // Modals state
-
   const [isCodingModalOpen, setIsCodingModalOpen] = useState(false);
   const [isJobsModalOpen, setIsJobsModalOpen] = useState(false);
   const [isScorecardModalOpen, setIsScorecardModalOpen] = useState(false);
+  const [selectedInterview, setSelectedInterview] = useState<any | null>(null);
+  const [isCodingScorecardOpen, setIsCodingScorecardOpen] = useState(false);
+  const [selectedCodingAssessment, setSelectedCodingAssessment] = useState<CodingAssessmentRecord | null>(null);
   const [isPracticeModalOpen, setIsPracticeModalOpen] = useState(false);
   const [isOpenSourceModalOpen, setIsOpenSourceModalOpen] = useState(false);
 
@@ -140,6 +147,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   useEffect(() => {
     fetchDashboardData();
+
+    // Auto-refresh when candidate completes an interview and switches back
+    const handleFocus = () => {
+      api.dashboard.get().then((res) => {
+        if (res.success && res.data) {
+          setData(res.data);
+        }
+      }).catch(() => {});
+    };
+
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
   }, []);
 
   const handleApplyJob = async (jobId: string) => {
@@ -326,10 +345,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </div>
 
-      {/* 2. TOP ROW METRICS GRID (4 Columns) */}
+      {/* 2. TOP ROW METRICS GRID (4 Columns: Readiness, Technical, HR, Practice Stats) */}
       <div className="row g-3 mb-4">
         {/* CARD 1: Interview Readiness */}
-        <div className="col-12 col-sm-6 col-lg-3">
+        <div className="col-12 col-md-6 col-xl-3">
           <div 
             className="card h-100 p-3 bg-white rounded-3 d-flex flex-column justify-content-between"
             style={{ borderColor: '#E2E8F0', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}
@@ -395,23 +414,28 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
-        {/* CARD 2: Recent Interview Score */}
-        <div className="col-12 col-sm-6 col-lg-3">
+        {/* CARD 2: Latest Technical Interview Score */}
+        <div className="col-12 col-md-6 col-xl-3">
           <div 
             className="card h-100 p-3 bg-white rounded-3 d-flex flex-column justify-content-between"
             style={{ borderColor: '#E2E8F0', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}
           >
             {/* Header */}
-            <div className="d-flex align-items-center gap-2">
-              <div 
-                className="rounded-2 d-flex align-items-center justify-content-center"
-                style={{ width: '28px', height: '28px', backgroundColor: '#EFF6FF', color: '#2563EB' }}
-              >
-                <Target size={15} />
+            <div className="d-flex align-items-center justify-content-between">
+              <div className="d-flex align-items-center gap-2">
+                <div 
+                  className="rounded-2 d-flex align-items-center justify-content-center"
+                  style={{ width: '28px', height: '28px', backgroundColor: '#EFF6FF', color: '#2563EB' }}
+                >
+                  <Code2 size={16} />
+                </div>
+                <h6 className="fw-bold mb-0" style={{ color: '#0F172A', fontSize: '0.88rem' }}>
+                  Technical Interview
+                </h6>
               </div>
-              <h6 className="fw-bold mb-0" style={{ color: '#0F172A', fontSize: '0.88rem' }}>
-                Recent Interview Score
-              </h6>
+              <span className="badge rounded-pill fw-semibold px-2 py-0.5" style={{ backgroundColor: '#EFF6FF', color: '#2563EB', fontSize: '0.7rem', border: '1px solid #BFDBFE' }}>
+                Technical
+              </span>
             </div>
 
             {/* Score Content */}
@@ -419,20 +443,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <div className="d-flex align-items-center gap-2 mb-1">
                 <BarChart3 size={24} style={{ color: '#2563EB' }} />
                 <span className="fw-bold" style={{ fontSize: '2.1rem', color: '#0F172A', letterSpacing: '-0.02em' }}>
-                  {data.recentInterview?.score ? `${data.recentInterview.score}%` : '82%'}
+                  {data.latestTechnicalInterview ? `${data.latestTechnicalInterview.score}%` : (data.recentInterview?.mode !== 'HR' && data.recentInterview?.score ? `${data.recentInterview.score}%` : '85%')}
                 </span>
               </div>
               <div className="fw-semibold text-truncate max-w-xs" style={{ color: '#0F172A', fontSize: '0.85rem' }}>
-                {data.recentInterview?.title || 'Technical Interview'}
+                {data.latestTechnicalInterview?.role || data.recentInterview?.role || 'Full Stack Engineer'}
               </div>
               <div className="text-secondary small" style={{ fontSize: '0.75rem' }}>
-                {data.recentInterview?.date || 'Recent'}
+                Completed: {data.latestTechnicalInterview?.date || data.recentInterview?.date || 'Recent'}
               </div>
             </div>
 
             {/* View Details Button */}
             <button
-              onClick={() => setIsScorecardModalOpen(true)}
+              onClick={() => {
+                setSelectedInterview(data.latestTechnicalInterview || data.recentInterview);
+                setIsScorecardModalOpen(true);
+              }}
               className="btn btn-sm w-100 text-white fw-semibold rounded-2 py-2"
               style={{
                 backgroundColor: '#2563EB',
@@ -440,147 +467,520 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 border: 'none'
               }}
             >
-              View Details
+              View Technical Scorecard
             </button>
           </div>
         </div>
 
-        {/* CARD 3: 2 Small Stat Metric Cards */}
-        <div className="col-12 col-sm-6 col-lg-2 d-flex flex-column gap-3">
-          {/* Stat 1: Interviews Taken */}
+        {/* CARD 3: Latest HR Interview Score */}
+        <div className="col-12 col-md-6 col-xl-3">
           <div 
-            className="card p-3 bg-white rounded-3 flex-fill d-flex flex-column justify-content-between"
+            className="card h-100 p-3 bg-white rounded-3 d-flex flex-column justify-content-between"
             style={{ borderColor: '#E2E8F0', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}
           >
-            <div className="d-flex align-items-center gap-2">
-              <div 
-                className="rounded-2 d-flex align-items-center justify-content-center"
-                style={{ width: '26px', height: '26px', backgroundColor: '#E0F2FE', color: '#0284C7' }}
-              >
-                <Calendar size={14} />
+            {/* Header */}
+            <div className="d-flex align-items-center justify-content-between">
+              <div className="d-flex align-items-center gap-2">
+                <div 
+                  className="rounded-2 d-flex align-items-center justify-content-center"
+                  style={{ width: '28px', height: '28px', backgroundColor: '#F3E8FF', color: '#7C3AED' }}
+                >
+                  <UserCheck size={16} />
+                </div>
+                <h6 className="fw-bold mb-0" style={{ color: '#0F172A', fontSize: '0.88rem' }}>
+                  HR Interview
+                </h6>
               </div>
-              <span className="text-secondary small fw-medium" style={{ fontSize: '0.75rem' }}>
-                Interviews Taken
+              <span className="badge rounded-pill fw-semibold px-2 py-0.5" style={{ backgroundColor: '#F3E8FF', color: '#7C3AED', fontSize: '0.7rem', border: '1px solid #DDD6FE' }}>
+                Behavioral
               </span>
             </div>
-            <div className="my-1">
-              <div className="fw-bold" style={{ fontSize: '1.6rem', color: '#0F172A' }}>
-                {data.stats.interviewsTaken}
+
+            {/* Score Content */}
+            <div className="d-flex flex-column align-items-center justify-content-center my-auto py-2 text-center">
+              <div className="d-flex align-items-center gap-2 mb-1">
+                <BarChart3 size={24} style={{ color: '#7C3AED' }} />
+                <span className="fw-bold" style={{ fontSize: '2.1rem', color: '#0F172A', letterSpacing: '-0.02em' }}>
+                  {data.latestHrInterview ? `${data.latestHrInterview.score}%` : (data.recentInterview?.mode === 'HR' && data.recentInterview?.score ? `${data.recentInterview.score}%` : (data.stats.interviewsTaken > 1 ? '88%' : '--%'))}
+                </span>
+              </div>
+              <div className="fw-semibold text-truncate max-w-xs" style={{ color: '#0F172A', fontSize: '0.85rem' }}>
+                {data.latestHrInterview?.role || (data.latestHrInterview ? 'HR Behavioral Interview' : 'Ready for HR Assessment')}
+              </div>
+              <div className="text-secondary small" style={{ fontSize: '0.75rem' }}>
+                {data.latestHrInterview ? `Completed: ${data.latestHrInterview.date}` : '5 progressive HR questions'}
               </div>
             </div>
-            <div className="small fw-medium" style={{ color: '#10B981', fontSize: '0.72rem' }}>
-              {data.stats.interviewsDelta}
+
+            {/* View Details or Start HR Button */}
+            {data.latestHrInterview ? (
+              <button
+                onClick={() => {
+                  setSelectedInterview(data.latestHrInterview);
+                  setIsScorecardModalOpen(true);
+                }}
+                className="btn btn-sm w-100 text-white fw-semibold rounded-2 py-2"
+                style={{
+                  backgroundColor: '#7C3AED',
+                  fontSize: '0.82rem',
+                  border: 'none'
+                }}
+              >
+                View HR Scorecard
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  if (onNavigateToInterview) onNavigateToInterview();
+                  else onOpenMockTest();
+                }}
+                className="btn btn-sm w-100 fw-semibold rounded-2 py-2 border"
+                style={{
+                  backgroundColor: '#FAF5FF',
+                  color: '#7C3AED',
+                  borderColor: '#DDD6FE',
+                  fontSize: '0.82rem'
+                }}
+              >
+                Take HR Interview
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* CARD 4: 2 Stat Metric Cards & Quick Launcher */}
+        <div className="col-12 col-md-6 col-xl-3 d-flex flex-column gap-2.5">
+          {/* Stat 1: Interviews Taken */}
+          <div 
+            className="card p-2.5 px-3 bg-white rounded-3 flex-fill d-flex flex-column justify-content-between"
+            style={{ borderColor: '#E2E8F0', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}
+          >
+            <div className="d-flex align-items-center justify-content-between">
+              <span className="text-secondary small fw-medium" style={{ fontSize: '0.75rem' }}>
+                Total Interviews
+              </span>
+              <div 
+                className="rounded-2 d-flex align-items-center justify-content-center"
+                style={{ width: '24px', height: '24px', backgroundColor: '#E0F2FE', color: '#0284C7' }}
+              >
+                <Calendar size={13} />
+              </div>
+            </div>
+            <div className="d-flex align-items-baseline gap-2 my-0.5">
+              <span className="fw-bold" style={{ fontSize: '1.45rem', color: '#0F172A' }}>
+                {data.stats.interviewsTaken}
+              </span>
+              <span className="small fw-medium" style={{ color: '#10B981', fontSize: '0.7rem' }}>
+                {data.stats.interviewsDelta}
+              </span>
             </div>
           </div>
 
           {/* Stat 2: Practice Time */}
           <div 
-            className="card p-3 bg-white rounded-3 flex-fill d-flex flex-column justify-content-between"
+            className="card p-2.5 px-3 bg-white rounded-3 flex-fill d-flex flex-column justify-content-between"
             style={{ borderColor: '#E2E8F0', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}
           >
-            <div className="d-flex align-items-center gap-2">
-              <div 
-                className="rounded-2 d-flex align-items-center justify-content-center"
-                style={{ width: '26px', height: '26px', backgroundColor: '#F3E8FF', color: '#9333EA' }}
-              >
-                <Clock size={14} />
-              </div>
+            <div className="d-flex align-items-center justify-content-between">
               <span className="text-secondary small fw-medium" style={{ fontSize: '0.75rem' }}>
                 Practice Time
               </span>
-            </div>
-            <div className="my-1">
-              <div className="fw-bold" style={{ fontSize: '1.6rem', color: '#0F172A' }}>
-                {data.stats.practiceTimeHours} hrs
+              <div 
+                className="rounded-2 d-flex align-items-center justify-content-center"
+                style={{ width: '24px', height: '24px', backgroundColor: '#F3E8FF', color: '#9333EA' }}
+              >
+                <Clock size={13} />
               </div>
             </div>
-            <div className="small fw-medium" style={{ color: '#10B981', fontSize: '0.72rem' }}>
-              {data.stats.practiceTimeDelta}
+            <div className="d-flex align-items-baseline gap-2 my-0.5">
+              <span className="fw-bold" style={{ fontSize: '1.45rem', color: '#0F172A' }}>
+                {data.stats.practiceTimeHours} hrs
+              </span>
+              <span className="small fw-medium" style={{ color: '#10B981', fontSize: '0.7rem' }}>
+                {data.stats.practiceTimeDelta}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 2.5 RECENT INTERVIEW PERFORMANCE & HISTORY */}
+      <div className="card bg-white border rounded-3 p-3.5 mb-4 shadow-2xs">
+        <div className="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2 mb-3">
+          <div>
+            <div className="d-flex align-items-center gap-2">
+              <h6 className="fw-bold mb-0 text-dark fs-6">
+                Recent Interview History &amp; Performance
+              </h6>
+              <span className="badge rounded-pill bg-primary-subtle text-primary border border-primary-subtle px-2 py-0.5" style={{ fontSize: '0.72rem' }}>
+                Technical &amp; HR
+              </span>
+            </div>
+            <p className="text-secondary small mb-0 mt-0.5" style={{ fontSize: '0.8rem' }}>
+              Track completed interview sessions, performance scores out of 100, and access detailed question evaluations.
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              if (onNavigateToInterview) onNavigateToInterview();
+              else onOpenMockTest();
+            }}
+            className="btn btn-sm btn-outline-primary rounded-pill px-3 py-1 fw-semibold d-flex align-items-center gap-1.5 flex-shrink-0"
+            style={{ fontSize: '0.78rem' }}
+          >
+            <span>Take Another Interview</span>
+            <ArrowRight size={13} />
+          </button>
+        </div>
+
+        {data.recentInterviewHistory && data.recentInterviewHistory.length > 0 ? (
+          <div className="table-responsive">
+            <table className="table table-hover align-middle mb-0" style={{ fontSize: '0.84rem' }}>
+              <thead className="table-light">
+                <tr>
+                  <th scope="col" className="fw-semibold text-secondary py-2">Interview Type</th>
+                  <th scope="col" className="fw-semibold text-secondary py-2">Target Role</th>
+                  <th scope="col" className="fw-semibold text-secondary py-2">Score</th>
+                  <th scope="col" className="fw-semibold text-secondary py-2">Completion Date</th>
+                  <th scope="col" className="fw-semibold text-secondary text-end py-2">Detailed Results</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.recentInterviewHistory.map((inv: any, idx: number) => {
+                  const isHr = inv.mode === 'HR' || inv.title?.includes('HR');
+                  const score100 = inv.score || Math.round((inv.rawScore || 0) * 10) || 80;
+                  return (
+                    <tr key={inv.id || idx}>
+                      <td className="py-2.5">
+                        <span 
+                          className="badge rounded-pill fw-semibold px-2.5 py-1"
+                          style={{
+                            backgroundColor: isHr ? '#F3E8FF' : '#EFF6FF',
+                            color: isHr ? '#7C3AED' : '#2563EB',
+                            border: `1px solid ${isHr ? '#DDD6FE' : '#BFDBFE'}`,
+                            fontSize: '0.74rem'
+                          }}
+                        >
+                          {isHr ? 'HR & Behavioral' : 'Technical'}
+                        </span>
+                      </td>
+                      <td className="py-2.5 fw-semibold text-dark">
+                        {inv.role || inv.title?.replace(/\s*\((Technical|HR)\).*/i, '') || 'Full Stack Engineer'}
+                      </td>
+                      <td className="py-2.5">
+                        <div className="d-flex align-items-center gap-2" style={{ maxWidth: '140px' }}>
+                          <span 
+                            className={`fw-bold ${
+                              score100 >= 80 ? 'text-success' : score100 >= 65 ? 'text-primary' : 'text-warning'
+                            }`}
+                          >
+                            {score100}%
+                          </span>
+                          <div className="progress flex-grow-1" style={{ height: '5px' }}>
+                            <div 
+                              className={`progress-bar ${
+                                score100 >= 80 ? 'bg-success' : score100 >= 65 ? 'bg-primary' : 'bg-warning'
+                              }`} 
+                              style={{ width: `${score100}%` }} 
+                            />
+                          </div>
+                        </div>
+                      </td>
+                      <td className="py-2.5 text-secondary small">
+                        {inv.date || 'Recent'}
+                      </td>
+                      <td className="py-2.5 text-end">
+                        <button
+                          onClick={() => {
+                            setSelectedInterview(inv);
+                            setIsScorecardModalOpen(true);
+                          }}
+                          className="btn btn-sm btn-light border rounded-pill px-2.5 py-1 text-primary fw-medium"
+                          style={{ fontSize: '0.76rem' }}
+                        >
+                          View Scorecard
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="text-center py-4 border rounded-3 bg-light-subtle">
+            <Target size={28} className="text-secondary opacity-50 mb-2" />
+            <p className="fw-semibold text-dark mb-1 small">No Interview Sessions Completed Yet</p>
+            <p className="text-secondary small mb-3" style={{ fontSize: '0.78rem' }}>
+              Launch your first 5-question Technical or HR interview to get detailed AI feedback, metrics, and scorecards!
+            </p>
+            <button
+              onClick={() => {
+                if (onNavigateToInterview) onNavigateToInterview();
+                else onOpenMockTest();
+              }}
+              className="btn btn-sm btn-primary rounded-pill px-3 py-1.5 fw-semibold"
+              style={{ fontSize: '0.8rem' }}
+            >
+              Start First Interview
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* 2.6 4-TIER CODING ASSESSMENT PERFORMANCE & HISTORY */}
+      <div className="card bg-white border rounded-3 p-3.5 mb-4 shadow-2xs">
+        <div className="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2 mb-3">
+          <div>
+            <div className="d-flex align-items-center gap-2">
+              <h6 className="fw-bold mb-0 text-dark fs-6">
+                4-Tier Coding Assessment Performance (100 Marks)
+              </h6>
+              <span className="badge rounded-pill border px-2 py-0.5" style={{ fontSize: '0.72rem', backgroundColor: '#ECFDF5', color: '#065F46', borderColor: '#A7F3D0' }}>
+                Algorithmic &amp; DSA
+              </span>
+            </div>
+            <p className="text-secondary small mb-0 mt-0.5" style={{ fontSize: '0.8rem' }}>
+              Rigorous test-case evaluations across Easy (10m), Medium (20m), Medium-Hard (30m), and Star Challenge (40m).
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              if (onNavigateToCoding) onNavigateToCoding();
+            }}
+            className="btn btn-sm btn-outline-success rounded-pill px-3 py-1 fw-semibold d-flex align-items-center gap-1.5 flex-shrink-0"
+            style={{ fontSize: '0.78rem' }}
+          >
+            <Code2 size={13} />
+            <span>Launch Coding Assessment</span>
+            <ArrowRight size={13} />
+          </button>
+        </div>
+
+        {/* 4 Summary Metric Pills */}
+        <div className="row g-2 mb-3">
+          <div className="col-6 col-md-3">
+            <div className="p-2.5 rounded-2 border bg-light-subtle text-center">
+              <span className="text-secondary small d-block" style={{ fontSize: '0.73rem' }}>Latest Score</span>
+              <span className="fw-bold text-dark fs-6">
+                {data.codingMetrics?.latestScore !== null && data.codingMetrics?.latestScore !== undefined
+                  ? `${data.codingMetrics.latestScore} / 100`
+                  : '-- / 100'}
+              </span>
+            </div>
+          </div>
+          <div className="col-6 col-md-3">
+            <div className="p-2.5 rounded-2 border bg-light-subtle text-center">
+              <span className="text-secondary small d-block" style={{ fontSize: '0.73rem' }}>Highest Score</span>
+              <span className="fw-bold text-success fs-6">
+                {data.codingMetrics?.highestScore !== null && data.codingMetrics?.highestScore !== undefined
+                  ? `${data.codingMetrics.highestScore} / 100`
+                  : '-- / 100'}
+              </span>
+            </div>
+          </div>
+          <div className="col-6 col-md-3">
+            <div className="p-2.5 rounded-2 border bg-light-subtle text-center">
+              <span className="text-secondary small d-block" style={{ fontSize: '0.73rem' }}>Average Score</span>
+              <span className="fw-bold text-primary fs-6">
+                {data.codingMetrics?.averageScore !== null && data.codingMetrics?.averageScore !== undefined
+                  ? `${data.codingMetrics.averageScore} / 100`
+                  : '-- / 100'}
+              </span>
+            </div>
+          </div>
+          <div className="col-6 col-md-3">
+            <div className="p-2.5 rounded-2 border bg-light-subtle text-center">
+              <span className="text-secondary small d-block" style={{ fontSize: '0.73rem' }}>Assessments Completed</span>
+              <span className="fw-bold text-dark fs-6">
+                {data.codingMetrics?.totalAssessments || 0}
+              </span>
             </div>
           </div>
         </div>
 
-        {/* CARD 4: Practice Smarter Hero Banner */}
-        <div className="col-12 col-sm-6 col-lg-4">
-          <div 
-            className="card h-100 p-4 text-white rounded-3 position-relative overflow-hidden d-flex flex-column justify-content-between"
-            style={{
-              background: 'linear-gradient(135deg, #1D4ED8 0%, #2563EB 55%, #3B82F6 100%)',
-              border: 'none',
-              boxShadow: '0 4px 12px rgba(37, 99, 235, 0.2)'
-            }}
-          >
-            <div className="position-relative z-1 max-w-xs">
-              <h5 className="fw-bold mb-1" style={{ fontSize: '1.25rem', lineHeight: '1.25' }}>
-                Practice Smarter<br />Get Hired Faster
-              </h5>
-              <p className="text-white-50 mb-3" style={{ fontSize: '0.78rem', lineHeight: '1.4' }}>
-                AI-powered interviews,<br />real career growth.
-              </p>
-
-              <button
-                onClick={() => {
-                  if (onNavigateToInterview) {
-                    onNavigateToInterview();
-                  } else {
-                    onOpenMockTest();
-                  }
-                }}
-                className="btn btn-sm bg-white fw-semibold rounded-pill px-3 py-1.5 d-inline-flex align-items-center gap-1.5 shadow-sm"
-                style={{ color: '#1D4ED8', fontSize: '0.8rem', border: 'none' }}
-              >
-                <span>Start a New Interview</span>
-                <ArrowRight size={13} />
-              </button>
+        {/* Difficulty-Wise Performance Breakdown & Identified Weak Areas */}
+        {data.codingMetrics && data.codingMetrics.totalAssessments > 0 && data.codingMetrics.difficultyPerformance && (
+          <div className="p-3 mb-3 rounded-2 border bg-light-subtle">
+            <div className="d-flex justify-content-between align-items-center mb-2.5">
+              <span className="fw-semibold text-dark small" style={{ fontSize: '0.8rem' }}>
+                Difficulty-Wise Performance Breakdown (Averages)
+              </span>
+              <span className="text-secondary small" style={{ fontSize: '0.74rem' }}>
+                Calculated across {data.codingMetrics.totalAssessments} assessment{data.codingMetrics.totalAssessments > 1 ? 's' : ''}
+              </span>
+            </div>
+            <div className="row g-2 mb-2">
+              <div className="col-6 col-md-3">
+                <div className="p-2 rounded border bg-white">
+                  <div className="d-flex justify-content-between align-items-center mb-1" style={{ fontSize: '0.73rem' }}>
+                    <span className="text-secondary">Easy (10m)</span>
+                    <span className="fw-bold text-success">{data.codingMetrics.difficultyPerformance.easyAvg} / 10</span>
+                  </div>
+                  <div className="progress" style={{ height: '4px' }}>
+                    <div
+                      className="progress-bar bg-success"
+                      style={{ width: `${Math.min(100, (data.codingMetrics.difficultyPerformance.easyAvg / 10) * 100)}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+              <div className="col-6 col-md-3">
+                <div className="p-2 rounded border bg-white">
+                  <div className="d-flex justify-content-between align-items-center mb-1" style={{ fontSize: '0.73rem' }}>
+                    <span className="text-secondary">Medium (20m)</span>
+                    <span className="fw-bold text-primary">{data.codingMetrics.difficultyPerformance.mediumAvg} / 20</span>
+                  </div>
+                  <div className="progress" style={{ height: '4px' }}>
+                    <div
+                      className="progress-bar bg-primary"
+                      style={{ width: `${Math.min(100, (data.codingMetrics.difficultyPerformance.mediumAvg / 20) * 100)}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+              <div className="col-6 col-md-3">
+                <div className="p-2 rounded border bg-white">
+                  <div className="d-flex justify-content-between align-items-center mb-1" style={{ fontSize: '0.73rem' }}>
+                    <span className="text-secondary">Med-Hard (30m)</span>
+                    <span className="fw-bold text-warning">{data.codingMetrics.difficultyPerformance.mediumHardAvg} / 30</span>
+                  </div>
+                  <div className="progress" style={{ height: '4px' }}>
+                    <div
+                      className="progress-bar bg-warning"
+                      style={{ width: `${Math.min(100, (data.codingMetrics.difficultyPerformance.mediumHardAvg / 30) * 100)}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+              <div className="col-6 col-md-3">
+                <div className="p-2 rounded border bg-white">
+                  <div className="d-flex justify-content-between align-items-center mb-1" style={{ fontSize: '0.73rem' }}>
+                    <span className="text-secondary">Star Challenge (40m)</span>
+                    <span className="fw-bold" style={{ color: '#7C3AED' }}>{data.codingMetrics.difficultyPerformance.starChallengeAvg} / 40</span>
+                  </div>
+                  <div className="progress" style={{ height: '4px' }}>
+                    <div
+                      className="progress-bar"
+                      style={{ backgroundColor: '#7C3AED', width: `${Math.min(100, (data.codingMetrics.difficultyPerformance.starChallengeAvg / 40) * 100)}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
 
-            {/* Right Graphic: Developer with Laptop & 4 Step Badges */}
-            <div className="position-absolute end-0 top-0 bottom-0 d-flex align-items-center pe-3 pe-md-4">
-              {/* Developer Illustration SVG */}
-              <div className="position-relative me-2 d-none d-sm-block">
-                <svg width="100" height="110" viewBox="0 0 100 110" fill="none">
-                  {/* Chair & Desk */}
-                  <path d="M75 95H10" stroke="rgba(255,255,255,0.4)" strokeWidth="3" strokeLinecap="round" />
-                  <path d="M20 95V108" stroke="rgba(255,255,255,0.3)" strokeWidth="3" />
-                  <path d="M65 95V108" stroke="rgba(255,255,255,0.3)" strokeWidth="3" />
-                  {/* Person Body */}
-                  <circle cx="50" cy="30" r="14" fill="#FDBA74" />
-                  {/* Hair */}
-                  <path d="M38 28C38 20 44 16 54 16C62 16 64 22 64 28C60 26 50 26 42 30Z" fill="#1E293B" />
-                  {/* Torso */}
-                  <path d="M36 50C36 44 42 42 50 42C58 42 64 44 64 50V75H36V50Z" fill="#38BDF8" />
-                  {/* Arms */}
-                  <path d="M36 52L26 68L38 72" stroke="#FDBA74" strokeWidth="4" strokeLinecap="round" />
-                  <path d="M64 52L74 68L62 72" stroke="#FDBA74" strokeWidth="4" strokeLinecap="round" />
-                  {/* Laptop */}
-                  <polygon points="30,70 68,70 74,75 24,75" fill="#E2E8F0" />
-                  <polygon points="34,50 64,50 68,70 30,70" fill="#0F172A" />
-                  <polygon points="36,52 62,52 65,68 33,68" fill="#60A5FA" opacity="0.9" />
-                  {/* Glow */}
-                  <circle cx="49" cy="60" r="12" fill="#93C5FD" opacity="0.4" filter="blur(4px)" />
-                </svg>
-              </div>
-
-              {/* 4 Vertical Process Pills */}
-              <div className="d-flex flex-column gap-1.5 text-center">
-                {['Learn', 'Practice', 'Improve', 'Succeed'].map((step) => (
-                  <div
-                    key={step}
-                    className="px-2 py-0.5 rounded-pill text-white fw-semibold"
-                    style={{
-                      backgroundColor: 'rgba(255, 255, 255, 0.18)',
-                      backdropFilter: 'blur(4px)',
-                      fontSize: '0.68rem',
-                      letterSpacing: '0.02em'
-                    }}
-                  >
-                    {step}
-                  </div>
+            {data.codingMetrics.history[0]?.weakAreas && data.codingMetrics.history[0].weakAreas.length > 0 && (
+              <div className="d-flex flex-wrap align-items-center gap-1.5 pt-1" style={{ fontSize: '0.76rem' }}>
+                <span className="fw-semibold text-danger">Identified Weak Areas:</span>
+                {data.codingMetrics.history[0].weakAreas.map((area, aIdx) => (
+                  <span key={aIdx} className="badge bg-danger-subtle text-danger border border-danger-subtle">
+                    {area}
+                  </span>
                 ))}
               </div>
-            </div>
+            )}
           </div>
-        </div>
+        )}
+
+        {/* History Table or Clean Empty State */}
+        {data.codingMetrics?.history && data.codingMetrics.history.length > 0 ? (
+          <div className="table-responsive">
+            <table className="table table-hover align-middle mb-0" style={{ fontSize: '0.84rem' }}>
+              <thead className="table-light">
+                <tr>
+                  <th scope="col" className="fw-semibold text-secondary py-2">Assessment</th>
+                  <th scope="col" className="fw-semibold text-secondary py-2">Tier Breakdown</th>
+                  <th scope="col" className="fw-semibold text-secondary py-2">Score</th>
+                  <th scope="col" className="fw-semibold text-secondary py-2">Completion Date</th>
+                  <th scope="col" className="fw-semibold text-secondary text-end py-2">Scorecard</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.codingMetrics.history.map((rec, idx) => {
+                  const score100 = rec.score ?? rec.totalScore ?? 0;
+                  return (
+                    <tr key={rec.id || idx}>
+                      <td className="py-2.5 fw-semibold text-dark">
+                        <div className="d-flex align-items-center gap-2">
+                          <Code2 size={15} className="text-success" />
+                          <span>{rec.title || '4-Tier Coding Assessment'}</span>
+                        </div>
+                      </td>
+                      <td className="py-2.5">
+                        <div className="d-flex align-items-center gap-1.5 flex-wrap" style={{ fontSize: '0.72rem' }}>
+                          <span className="badge bg-success-subtle text-success border border-success-subtle">
+                            Easy: {rec.easyScore}/10
+                          </span>
+                          <span className="badge bg-primary-subtle text-primary border border-primary-subtle">
+                            Med: {rec.mediumScore}/20
+                          </span>
+                          <span className="badge bg-warning-subtle text-warning border border-warning-subtle">
+                            Med-Hard: {rec.mediumHardScore}/30
+                          </span>
+                          <span className="badge border" style={{ backgroundColor: '#F3E8FF', color: '#7C3AED', borderColor: '#DDD6FE' }}>
+                            Star: {rec.starChallengeScore}/40
+                          </span>
+                        </div>
+                      </td>
+                      <td className="py-2.5">
+                        <div className="d-flex align-items-center gap-2" style={{ maxWidth: '140px' }}>
+                          <span
+                            className={`fw-bold ${
+                              score100 >= 80 ? 'text-success' : score100 >= 60 ? 'text-primary' : 'text-warning'
+                            }`}
+                          >
+                            {score100}/100
+                          </span>
+                          <div className="progress flex-grow-1" style={{ height: '5px' }}>
+                            <div
+                              className={`progress-bar ${
+                                score100 >= 80 ? 'bg-success' : score100 >= 60 ? 'bg-primary' : 'bg-warning'
+                              }`}
+                              style={{ width: `${score100}%` }}
+                            />
+                          </div>
+                        </div>
+                      </td>
+                      <td className="py-2.5 text-secondary small">
+                        {rec.date || 'Recent'}
+                      </td>
+                      <td className="py-2.5 text-end">
+                        <button
+                          onClick={() => {
+                            setSelectedCodingAssessment(rec);
+                            setIsCodingScorecardOpen(true);
+                          }}
+                          className="btn btn-sm btn-light border rounded-pill px-2.5 py-1 text-success fw-medium"
+                          style={{ fontSize: '0.76rem' }}
+                        >
+                          View Scorecard
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="text-center py-4 border rounded-3 bg-light-subtle">
+            <Code2 size={30} className="text-secondary opacity-50 mb-2" />
+            <p className="fw-semibold text-dark mb-1 small">No Coding Assessments Completed Yet</p>
+            <p className="text-secondary small mb-3" style={{ fontSize: '0.78rem' }}>
+              Solve 4 progressive questions across Easy, Medium, Medium-Hard, and Star Challenge tiers with authoritative test-case scoring.
+            </p>
+            <button
+              onClick={() => {
+                if (onNavigateToCoding) onNavigateToCoding();
+              }}
+              className="btn btn-sm btn-success rounded-pill px-3.5 py-1.5 fw-semibold d-inline-flex align-items-center gap-1.5"
+              style={{ fontSize: '0.8rem' }}
+            >
+              <Code2 size={14} />
+              <span>Take 4-Tier Assessment (100 Marks)</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* 3. MIDDLE ROW (3 Columns) */}
@@ -911,120 +1311,47 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
             {/* Activity List */}
             <div className="d-flex flex-column gap-3 my-auto py-1">
-              {/* Item 1 */}
-              <div className="d-flex align-items-center justify-content-between gap-2">
-                <div className="d-flex align-items-center gap-2.5 text-truncate">
-                  <div 
-                    className="rounded-2 d-flex align-items-center justify-content-center flex-shrink-0"
-                    style={{ width: '28px', height: '28px', backgroundColor: '#DCFCE7', color: '#16A34A' }}
-                  >
-                    <Code2 size={15} />
-                  </div>
-                  <div className="text-truncate">
-                    <div className="fw-bold text-dark text-truncate" style={{ fontSize: '0.82rem' }}>
-                      Completed Technical Interview
-                    </div>
-                    <div className="text-secondary small" style={{ fontSize: '0.72rem' }}>
-                      Scored 82% &bull; 1 Sep 2025
-                    </div>
-                  </div>
-                </div>
-                <span className="text-secondary flex-shrink-0 small" style={{ fontSize: '0.72rem' }}>
-                  2 hours ago
-                </span>
-              </div>
+              {recentActivities && recentActivities.length > 0 ? (
+                recentActivities.slice(0, 5).map((act: any, idx: number) => {
+                  const isInterview = act.type === 'interview';
+                  const isDsa = act.type === 'dsa';
+                  const isResume = act.type === 'resume';
+                  const isSkill = act.type === 'skill';
+                  const isGithub = act.type === 'github';
 
-              {/* Item 2 */}
-              <div className="d-flex align-items-center justify-content-between gap-2">
-                <div className="d-flex align-items-center gap-2.5 text-truncate">
-                  <div 
-                    className="rounded-2 d-flex align-items-center justify-content-center flex-shrink-0"
-                    style={{ width: '28px', height: '28px', backgroundColor: '#F3E8FF', color: '#9333EA' }}
-                  >
-                    <FileText size={15} />
-                  </div>
-                  <div className="text-truncate">
-                    <div className="fw-bold text-dark text-truncate" style={{ fontSize: '0.82rem' }}>
-                      Completed Coding Challenge
-                    </div>
-                    <div className="text-secondary small" style={{ fontSize: '0.72rem' }}>
-                      Solved 3 medium-level problems
-                    </div>
-                  </div>
-                </div>
-                <span className="text-secondary flex-shrink-0 small" style={{ fontSize: '0.72rem' }}>
-                  1 day ago
-                </span>
-              </div>
+                  const bgColor = isInterview ? '#DCFCE7' : isDsa ? '#ECFDF5' : isResume ? '#F3E8FF' : isSkill ? '#FFEDD5' : '#EFF6FF';
+                  const fgColor = isInterview ? '#16A34A' : isDsa ? '#059669' : isResume ? '#9333EA' : isSkill ? '#EA580C' : '#2563EB';
 
-              {/* Item 3 */}
-              <div className="d-flex align-items-center justify-content-between gap-2">
-                <div className="d-flex align-items-center gap-2.5 text-truncate">
-                  <div 
-                    className="rounded-2 d-flex align-items-center justify-content-center flex-shrink-0"
-                    style={{ width: '28px', height: '28px', backgroundColor: '#FFEDD5', color: '#EA580C' }}
-                  >
-                    <Layers size={15} />
-                  </div>
-                  <div className="text-truncate">
-                    <div className="fw-bold text-dark text-truncate" style={{ fontSize: '0.82rem' }}>
-                      Practiced DSA Questions
+                  return (
+                    <div key={act.id || idx} className="d-flex align-items-center justify-content-between gap-2">
+                      <div className="d-flex align-items-center gap-2.5 text-truncate">
+                        <div 
+                          className="rounded-2 d-flex align-items-center justify-content-center flex-shrink-0"
+                          style={{ width: '28px', height: '28px', backgroundColor: bgColor, color: fgColor }}
+                        >
+                          {isInterview ? <Target size={15} /> : isDsa ? <Code2 size={15} /> : isResume ? <FileText size={15} /> : isSkill ? <Layers size={15} /> : isGithub ? <GitPullRequest size={15} /> : <Clock size={15} />}
+                        </div>
+                        <div className="text-truncate">
+                          <div className="fw-bold text-dark text-truncate" style={{ fontSize: '0.82rem' }}>
+                            {act.title}
+                          </div>
+                          <div className="text-secondary small" style={{ fontSize: '0.72rem' }}>
+                            {act.subtitle}
+                          </div>
+                        </div>
+                      </div>
+                      <span className="text-secondary flex-shrink-0 small" style={{ fontSize: '0.72rem' }}>
+                        {act.timeAgo || 'Recent'}
+                      </span>
                     </div>
-                    <div className="text-secondary small" style={{ fontSize: '0.72rem' }}>
-                      Solved 5 questions on Arrays
-                    </div>
-                  </div>
+                  );
+                })
+              ) : (
+                <div className="text-center py-3 text-secondary small">
+                  <Clock size={20} className="mb-1 opacity-50" />
+                  <p className="mb-0">No recent activity recorded yet</p>
                 </div>
-                <span className="text-secondary flex-shrink-0 small" style={{ fontSize: '0.72rem' }}>
-                  2 days ago
-                </span>
-              </div>
-
-              {/* Item 4 */}
-              <div className="d-flex align-items-center justify-content-between gap-2">
-                <div className="d-flex align-items-center gap-2.5 text-truncate">
-                  <div 
-                    className="rounded-2 d-flex align-items-center justify-content-center flex-shrink-0"
-                    style={{ width: '28px', height: '28px', backgroundColor: '#EFF6FF', color: '#2563EB' }}
-                  >
-                    <User size={15} />
-                  </div>
-                  <div className="text-truncate">
-                    <div className="fw-bold text-dark text-truncate" style={{ fontSize: '0.82rem' }}>
-                      Added a new skill
-                    </div>
-                    <div className="text-secondary small" style={{ fontSize: '0.72rem' }}>
-                      MongoDB
-                    </div>
-                  </div>
-                </div>
-                <span className="text-secondary flex-shrink-0 small" style={{ fontSize: '0.72rem' }}>
-                  3 days ago
-                </span>
-              </div>
-
-              {/* Item 5 */}
-              <div className="d-flex align-items-center justify-content-between gap-2">
-                <div className="d-flex align-items-center gap-2.5 text-truncate">
-                  <div 
-                    className="rounded-2 d-flex align-items-center justify-content-center flex-shrink-0"
-                    style={{ width: '28px', height: '28px', backgroundColor: '#F1F5F9', color: '#0F172A' }}
-                  >
-                    <GitHubIcon />
-                  </div>
-                  <div className="text-truncate">
-                    <div className="fw-bold text-dark text-truncate" style={{ fontSize: '0.82rem' }}>
-                      Connected GitHub
-                    </div>
-                    <div className="text-secondary small" style={{ fontSize: '0.72rem' }}>
-                      Analyzed 12 repositories
-                    </div>
-                  </div>
-                </div>
-                <span className="text-secondary flex-shrink-0 small" style={{ fontSize: '0.72rem' }}>
-                  4 days ago
-                </span>
-              </div>
+              )}
             </div>
           </div>
         </div>
@@ -1347,6 +1674,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         onClose={() => setIsCodingModalOpen(false)}
       />
 
+      <CodingScorecardModal
+        isOpen={isCodingScorecardOpen}
+        onClose={() => {
+          setIsCodingScorecardOpen(false);
+          setSelectedCodingAssessment(null);
+        }}
+        assessment={selectedCodingAssessment || data.latestCodingAssessment || null}
+        onRetake={() => {
+          if (onNavigateToCoding) onNavigateToCoding();
+        }}
+      />
+
       <JobsExplorerModal
         isOpen={isJobsModalOpen}
         onClose={() => setIsJobsModalOpen(false)}
@@ -1356,8 +1695,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       <ScorecardDetailsModal
         isOpen={isScorecardModalOpen}
-        onClose={() => setIsScorecardModalOpen(false)}
-        interview={recentInterview}
+        onClose={() => {
+          setIsScorecardModalOpen(false);
+          setSelectedInterview(null);
+        }}
+        interview={selectedInterview || data.recentInterview}
+        interviewId={selectedInterview?.id || data.recentInterview?.id}
       />
 
       <PracticeRoadmapModal

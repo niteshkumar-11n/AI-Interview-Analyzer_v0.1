@@ -155,6 +155,7 @@ function isMongoConnected(): boolean {
 
 // Map MongoDB doc to standard User object
 function docToUser(doc: any): User {
+  const p = doc.profile || {};
   return {
     id: doc._id ? doc._id.toString() : doc.id,
     email: doc.email,
@@ -165,23 +166,49 @@ function docToUser(doc: any): User {
     resetTokenExpiry: doc.resetTokenExpiry,
     credits: typeof doc.credits === 'number' ? doc.credits : 100,
     profile: {
-      name: doc.profile?.name || '',
-      targetRole: doc.profile?.targetRole || 'Full Stack Engineer',
-      experience: doc.profile?.experience || 'Fresher',
-      college: doc.profile?.college || '',
-      graduationYear: doc.profile?.graduationYear || 2025,
-      education: doc.profile?.education || 'Bachelor of Technology',
-      bio: doc.profile?.bio || '',
-      location: doc.profile?.location || 'India',
-      github: doc.profile?.github || '',
-      linkedin: doc.profile?.linkedin || '',
-      portfolio: doc.profile?.portfolio || '',
-      phone: doc.profile?.phone || '',
-      skills: doc.profile?.skills || [
+      name: p.name || '',
+      targetRole: p.targetRole || 'Full Stack Engineer',
+      careerStatus: p.careerStatus || 'student',
+      onboardingStatus: p.onboardingStatus ? {
+        isCompleted: Boolean(p.onboardingStatus.isCompleted),
+        step: typeof p.onboardingStatus.step === 'number' ? p.onboardingStatus.step : 1,
+        careerStatus: p.onboardingStatus.careerStatus || p.careerStatus || 'student'
+      } : {
+        isCompleted: false,
+        step: 1,
+        careerStatus: p.careerStatus || 'student'
+      },
+      experience: p.experience || 'Fresher',
+      degree: p.degree || '',
+      specialization: p.specialization || '',
+      college: p.college || '',
+      academicYear: p.academicYear || '',
+      graduationYear: typeof p.graduationYear === 'number' ? p.graduationYear : 2025,
+      education: p.education || 'Bachelor of Technology',
+      currentJobTitle: p.currentJobTitle || '',
+      yearsOfExperience: p.yearsOfExperience || '',
+      currentCompany: p.currentCompany || '',
+      workHistory: Array.isArray(p.workHistory) ? p.workHistory : [],
+      preferredLocation: p.preferredLocation || 'Remote',
+      workMode: p.workMode || 'Hybrid',
+      previousBackground: p.previousBackground || '',
+      relevantExperience: p.relevantExperience || '',
+      desiredCareerPath: p.desiredCareerPath || '',
+      learningGoals: p.learningGoals || '',
+      bio: p.bio || '',
+      location: p.location || 'India',
+      github: p.github || '',
+      linkedin: p.linkedin || '',
+      portfolio: p.portfolio || '',
+      githubUrl: p.githubUrl || p.github || '',
+      linkedinUrl: p.linkedinUrl || p.linkedin || '',
+      portfolioUrl: p.portfolioUrl || p.portfolio || '',
+      phone: p.phone || '',
+      skills: Array.isArray(p.skills) ? p.skills : [
         { name: 'JavaScript', percentage: 80, level: 'Advanced' },
         { name: 'React', percentage: 75, level: 'Intermediate' }
       ],
-      workExperience: doc.profile?.workExperience || []
+      workExperience: Array.isArray(p.workExperience) ? p.workExperience : []
     }
   };
 }
@@ -347,6 +374,7 @@ export async function updateUserProfile(id: string, updates: Partial<UserProfile
           ...doc.profile,
           ...updates
         };
+        doc.markModified('profile');
         await doc.save();
         const updated = docToUser(doc.toObject());
         users.set(id, updated);
